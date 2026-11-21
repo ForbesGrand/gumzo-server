@@ -46,14 +46,16 @@ input,select{padding:10px 12px;border:1px solid var(--line);border-radius:10px;b
 <body>
 <div id="join">
   <h1>Gumzo</h1>
-  <p class="note">Choose a name so friends can find you.</p>
-  <input id="nm" placeholder="Your name" maxlength="30" aria-label="Your name" autocomplete="off">
-  <button class="pri" id="go">Join</button>
+  <p class="note">Log in, or create an account. Your name is how friends find you.</p>
+  <input id="nm" placeholder="Your name" maxlength="20" aria-label="Your name" autocomplete="username" autocapitalize="none">
+  <input id="pw" type="password" placeholder="Password (6 or more characters)" aria-label="Password" autocomplete="current-password">
+  <button class="pri" id="login">Log in</button>
+  <button id="signup" style="text-decoration:underline">Create account</button>
   <p id="err"></p>
 </div>
 <div class="app" id="app" hidden>
   <aside class="side">
-    <h2>Gumzo</h2>
+    <h2>Gumzo</h2><button class="note" id="logout" style="text-align:left;text-decoration:underline">Log out</button>
     <label class="note"><input type="checkbox" id="low"> Low-data mode (fewer signals, less data)</label>
     <div class="row2"><input id="nc" placeholder="Friend’s name" aria-label="Friend’s name" autocomplete="off"><button class="pri" id="start">Chat</button></div>
     <p class="note" id="status"></p>
@@ -71,14 +73,29 @@ function label(n){return n==="shop"?"Kariakoo Electronics (shop)":n}
 function status(t){$("status").textContent=t}
 function tx(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
 
+var token="";try{token=localStorage.getItem("gz")||""}catch(e){}
+function hm(s){var d=new Date(s);return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)}
+function auth(kind){
+  var n=$("nm").value.trim(),p=$("pw").value;
+  if(!n||!p){$("err").textContent="Type your name and password";return}
+  $("err").textContent="Please wait…";
+  fetch("/api/"+(kind==="login"?"login":"register"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:n,password:p})})
+  .then(function(r){return r.json()}).then(function(d){
+    if(d.error){$("err").textContent=d.error;return}
+    token=d.token;try{localStorage.setItem("gz",token)}catch(e){}
+    connect();
+  }).catch(function(){$("err").textContent="Could not reach the server. Try again."});
+}
 function connect(){
   ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);
-  ws.onopen=function(){tx({type:"join",name:me,lowData:low})};
-  ws.onmessage=function(e){var d=JSON.parse(e.data);handle({type:d.type||d.t,from:d.from||d.f,text:d.text||d.x,products:d.products})};
+  ws.onopen=function(){tx({type:"join",token:token,lowData:low})};
+  ws.onmessage=function(e){var d=JSON.parse(e.data);handle({type:d.type||d.t,from:d.from||d.f,text:d.text||d.x,products:d.products,name:d.name,msgs:d.msgs})};
   ws.onclose=function(){if(!$("app").hidden){status("Connection lost. Reconnecting…");setTimeout(connect,2000)}};
 }
 function handle(d){
-  if(d.type==="joined"){$("join").hidden=true;$("app").hidden=false;status("Connected as "+me);renderList();renderMain();return}
+  if(d.type==="auth"){token="";try{localStorage.removeItem("gz")}catch(e){}$("app").hidden=true;$("join").hidden=false;$("err").textContent="Please log in again";return}
+  if(d.type==="history"){chats={shop:{m:[],un:0}};d.msgs.forEach(function(x){var o=x.from===me?x.to:x.from;chat(o).m.push({me:x.from===me?1:0,t:x.text,time:hm(x.at)})});renderList();renderMain();return}
+  if(d.type==="joined"){me=d.name;$("join").hidden=true;$("app").hidden=false;status("Connected as "+me);renderList();renderMain();return}
   if(d.type==="error"){if($("app").hidden)$("err").textContent=d.text;else status(d.text);return}
   if(d.type==="catalog"){catalog=d.products;renderShop();return}
   if(d.type==="typing"){if(d.from===cur&&$("st")){$("st").textContent="typing…";setTimeout(function(){if($("st"))$("st").textContent=""},2000)}return}
@@ -130,8 +147,9 @@ function translate(i){
 }
 document.addEventListener("click",function(e){
   var t=e.target.closest("button");if(!t)return;
-  if(t.id==="go"){me=$("nm").value.trim();if(!me){$("err").textContent="Please type a name";return}$("err").textContent="Connecting…";connect();return}
-  if(t.id==="start"){var n=$("nc").value.trim();if(n&&n!==me){$("nc").value="";openChat(n)}return}
+  if(t.id==="login"||t.id==="signup")return auth(t.id==="login"?"login":"register");
+  if(t.id==="logout"){fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:token})}).then(function(){try{localStorage.removeItem("gz")}catch(e){}location.reload()});return}
+  if(t.id==="start"){var n=$("nc").value.trim().toLowerCase();if(n&&n!==me){$("nc").value="";openChat(n)}return}
   if(t.dataset.id)return openChat(t.dataset.id);
   if(t.id==="back"){$("app").classList.remove("open");return}
   if(t.id==="send")return send();
@@ -153,10 +171,11 @@ document.addEventListener("input",function(e){
 document.addEventListener("keydown",function(e){
   if(e.key!=="Enter")return;
   if(e.target.id==="in")send();
-  if(e.target.id==="nm")$("go").click();
+  if(e.target.id==="pw")$("login").click();
   if(e.target.id==="nc")$("start").click();
 });
 if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js");
+if(token){$("err").textContent="Signing in…";connect()}
 </script>
 </body>
 </html>
