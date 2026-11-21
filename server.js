@@ -28,9 +28,16 @@ const path = require("path");
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
-  if (url.pathname === "/") {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    return res.end(fs.readFileSync(path.join(__dirname, "index.html")));
+  const files = {
+    "/": ["index.html", "text/html; charset=utf-8"],
+    "/manifest.json": ["manifest.json", "application/manifest+json"],
+    "/sw.js": ["sw.js", "text/javascript"],
+    "/icon-192.png": ["icon-192.png", "image/png"],
+    "/icon-512.png": ["icon-512.png", "image/png"],
+  };
+  if (files[url.pathname]) {
+    res.writeHead(200, { "Content-Type": files[url.pathname][1] });
+    return res.end(fs.readFileSync(path.join(__dirname, files[url.pathname][0])));
   }
   if (url.pathname === "/api/products") return json(res, 200, products);
   if (url.pathname === "/api/translate") {

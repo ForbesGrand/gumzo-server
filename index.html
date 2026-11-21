@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Gumzo</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0E5C73">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <style>
 :root{--bg:#EEF3F5;--panel:#fff;--ink:#12262E;--mute:#6B7F88;--line:#DCE5E9;--me:#0E5C73;--meink:#fff;--them:#fff;--acc:#F4B63F;--accink:#3A2A00;--hover:#F2F7F9;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root{--bg:#0B1418;--panel:#122229;--ink:#E6F0F3;--mute:#8CA3AD;--line:#21383F;--me:#13839F;--them:#1A2F37;--hover:#183039}}
@@ -152,6 +156,7 @@ document.addEventListener("keydown",function(e){
   if(e.target.id==="nm")$("go").click();
   if(e.target.id==="nc")$("start").click();
 });
+if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js");
 </script>
 </body>
 </html>
