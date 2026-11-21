@@ -64,6 +64,7 @@ async function setup() {
   await q("create index if not exists msg_from on messages(from_user)");
   await q("create index if not exists msg_to on messages(to_user)");
   await q("create sequence if not exists order_seq");
+  await q("create table if not exists reads(name text not null, other text not null, last_id bigint not null default 0, primary key(name, other))");
   // The shop account is created from the SHOP_PASSWORD you set in Render. Nobody can sign up as "shop".
   if (process.env.SHOP_PASSWORD) {
     await q("insert into users(name,hash) values('shop',$1) on conflict (name) do update set hash = excluded.hash", [hash(process.env.SHOP_PASSWORD)]);
@@ -85,6 +86,13 @@ const server = http.createServer(async (req, res) => {
     return res.end(fs.readFileSync(path.join(__dirname, files[url.pathname][0])));
   }
   if (url.pathname === "/api/products") return json(res, 200, products);
+  if (url.pathname === "/api/exists") {
+    const n = String(url.searchParams.get("name") || "").toLowerCase();
+    try {
+      const r = await q("select 1 from users where name=$1", [n]);
+      return json(res, 200, { exists: r.rows.length > 0 });
+    } catch (e) { return json(res, 500, { error: "Server problem" }); }
+  }
 
   // ---------- Accounts ----------
   if (req.method === "POST" && (url.pathname === "/api/register" || url.pathname === "/api/login")) {
@@ -164,9 +172,18 @@ wss.on("connection", (ws) => {
         online.set(name, { ws, lowData: !!m.lowData });
         ws.send(JSON.stringify({ type: "joined", name }));
         const h = await q('select from_user as "from", to_user as "to", text, created as at from messages where from_user=$1 or to_user=$1 order by id desc limit 300', [name]);
-        return ws.send(JSON.stringify({ type: "history", msgs: h.rows.reverse() }));
+        const un = await q("select m.from_user as other, count(*)::int as n from messages m left join reads r on r.name=$1 and r.other=m.from_user where m.to_user=$1 and m.id > coalesce(r.last_id,0) group by m.from_user", [name]);
+        const unread = {};
+        un.rows.forEach((x) => { unread[x.other] = x.n; });
+        return ws.send(JSON.stringify({ type: "history", msgs: h.rows.reverse(), unread }));
       }
       if (!name) return fail("Join first");
+
+      if (m.type === "read") {
+        const other = String(m.with || "").toLowerCase();
+        await q("insert into reads(name,other,last_id) select $1,$2,coalesce(max(id),0) from messages where to_user=$1 and from_user=$2 on conflict (name,other) do update set last_id = excluded.last_id", [name, other]);
+        return;
+      }
 
       if (m.type === "lowdata") { online.get(name).lowData = !!m.on; return; }
 

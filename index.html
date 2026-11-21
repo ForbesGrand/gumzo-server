@@ -89,19 +89,19 @@ function auth(kind){
 function connect(){
   ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);
   ws.onopen=function(){tx({type:"join",token:token,lowData:low})};
-  ws.onmessage=function(e){var d=JSON.parse(e.data);handle({type:d.type||d.t,from:d.from||d.f,text:d.text||d.x,products:d.products,name:d.name,msgs:d.msgs})};
+  ws.onmessage=function(e){var d=JSON.parse(e.data);handle({type:d.type||d.t,from:d.from||d.f,text:d.text||d.x,products:d.products,name:d.name,msgs:d.msgs,unread:d.unread})};
   ws.onclose=function(){if(!$("app").hidden){status("Connection lost. Reconnecting…");setTimeout(connect,2000)}};
 }
 function handle(d){
   if(d.type==="auth"){token="";try{localStorage.removeItem("gz")}catch(e){}$("app").hidden=true;$("join").hidden=false;$("err").textContent="Please log in again";return}
-  if(d.type==="history"){chats={shop:{m:[],un:0}};d.msgs.forEach(function(x){var o=x.from===me?x.to:x.from;chat(o).m.push({me:x.from===me?1:0,t:x.text,time:hm(x.at)})});renderList();renderMain();return}
+  if(d.type==="history"){chats={shop:{m:[],un:0}};d.msgs.forEach(function(x){var o=x.from===me?x.to:x.from;chat(o).m.push({me:x.from===me?1:0,t:x.text,time:hm(x.at)})});Object.keys(d.unread||{}).forEach(function(k){chat(k).un=+d.unread[k]});if(cur){chat(cur).un=0;tx({type:"read",with:cur})}renderList();renderMain();return}
   if(d.type==="joined"){me=d.name;$("join").hidden=true;$("app").hidden=false;status("Connected as "+me);renderList();renderMain();return}
   if(d.type==="error"){if($("app").hidden)$("err").textContent=d.text;else status(d.text);return}
   if(d.type==="catalog"){catalog=d.products;renderShop();return}
   if(d.type==="typing"){if(d.from===cur&&$("st")){$("st").textContent="typing…";setTimeout(function(){if($("st"))$("st").textContent=""},2000)}return}
   if(d.type==="msg"||d.type==="order"){
     var c=chat(d.from);c.m.push({me:0,t:d.text,time:now()});
-    if(cur!==d.from)c.un++;
+    if(cur!==d.from)c.un++;else tx({type:"read",with:d.from});
     renderList();if(cur===d.from)renderMsgs();
   }
 }
@@ -134,7 +134,7 @@ function renderShop(){
   h+='<button class="pri" id="order">Place order</button>';
   if($("shop")){$("shop").innerHTML=h;$("shop").hidden=false}
 }
-function openChat(n){cur=n;chat(n).un=0;$("app").classList.add("open");renderList();renderMain()}
+function openChat(n){cur=n;chat(n).un=0;tx({type:"read",with:n});$("app").classList.add("open");renderList();renderMain()}
 function send(){
   var i=$("in"),v=i.value.trim();if(!v)return;
   chat(cur).m.push({me:1,t:v,time:now()});tx({type:"msg",to:cur,text:v});
@@ -149,7 +149,7 @@ document.addEventListener("click",function(e){
   var t=e.target.closest("button");if(!t)return;
   if(t.id==="login"||t.id==="signup")return auth(t.id==="login"?"login":"register");
   if(t.id==="logout"){fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:token})}).then(function(){try{localStorage.removeItem("gz")}catch(e){}location.reload()});return}
-  if(t.id==="start"){var n=$("nc").value.trim().toLowerCase();if(n&&n!==me){$("nc").value="";openChat(n)}return}
+  if(t.id==="start"){var n=$("nc").value.trim().toLowerCase();if(n&&n!==me){fetch("/api/exists?name="+encodeURIComponent(n)).then(function(r){return r.json()}).then(function(d){if(d.exists){$("nc").value="";openChat(n)}else status("No user called "+n+". Check the spelling.")}).catch(function(){status("Could not check. Try again.")})}return}
   if(t.dataset.id)return openChat(t.dataset.id);
   if(t.id==="back"){$("app").classList.remove("open");return}
   if(t.id==="send")return send();
