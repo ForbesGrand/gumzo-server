@@ -122,9 +122,10 @@ html[data-theme=yellow] .hdr{background:linear-gradient(125deg,var(--red),color-
 .sc .rg .av{width:100%;height:100%;box-shadow:0 0 0 2px var(--panel)}
 .sc small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--mute)}
 .sc .pl{position:absolute;right:-3px;bottom:-3px;width:22px;height:22px;border-radius:50%;background:var(--red);color:#fff;font-weight:700;line-height:18px;border:2px solid var(--panel);font-size:15px}
-.tabs{display:flex;border-bottom:1px solid var(--line)}
-.tabs button{flex:1;padding:10px 4px;font-weight:600;color:var(--mute);border-bottom:3px solid transparent}
+.tabs{display:flex;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:thin}
+.tabs button{flex:1 0 auto;min-width:68px;padding:10px 8px;font-weight:600;color:var(--mute);border-bottom:3px solid transparent}
 .tabs button.on{color:var(--red);border-color:var(--red)}
+.sms-panel{padding:12px;display:flex;flex-direction:column;gap:9px}.sms-panel textarea{width:100%;resize:vertical}.sms-controls{display:flex;gap:8px;flex-wrap:wrap}.sms-contact-list{display:flex;flex-direction:column;gap:5px;max-height:44vh;overflow:auto}.sms-contact{display:flex;align-items:center;gap:10px;text-align:left;padding:9px;border-radius:12px;background:#FFF9E8;color:#382900}.sms-contact>span:nth-child(2){display:flex;flex-direction:column;min-width:0}.sms-contact small{color:#806A34}.sms-avatar{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:#F5DF9A;color:#725100;font-weight:700}.sms-arrow{margin-left:auto;font-size:22px;color:#806A34}
 .tb{background:var(--red);color:#fff;border-radius:9px;font-size:11px;padding:0 6px;margin-left:4px}
 .svc{position:absolute;left:0;right:0;bottom:104px;padding:10px 16px;background:linear-gradient(transparent,rgba(0,0,0,.65));text-align:center;font-size:16px;word-break:break-word}
 #sv video{width:100%;max-height:84vh;object-fit:contain}
@@ -416,6 +417,7 @@ function loadProf(n){api("/api/user?name="+encodeURIComponent(n)).then(function(
 function lastId(n){var l=chats[n].m[chats[n].m.length-1];return l?(l.id||1e15):0}
 function renderList(){
   if(me)$("meav").innerHTML=avh(me);renderTabs();
+  if(tab==="sms"){renderSmsPanel();return}
   var h="";
   if(selectMode)h+='<div class="selbar"><span class="selcount">'+Object.keys(selectedChats).filter(function(n){return selectedChats[n]}).length+' selected</span><button id="multi_pin">Pin</button><button id="multi_archive">Archive</button><button id="multi_read">Read / unread</button><button id="multi_delete">Delete</button><button id="multi_done">Done</button></div>';
   var fl=($("srch")&&$("srch").value||"").trim().toLowerCase();
@@ -536,9 +538,9 @@ function applyChatBatch(action){
   selectedChats={};selectMode=false;renderList();renderMain();
 }
 function cat(n){return n==="shop"?"shop":isG(n)?"groups":"personal"}
-function renderTabs(){var b=$("tabs");if(!b)return;var c={all:0,personal:0,groups:0,shop:0};
+function renderTabs(){var b=$("tabs");if(!b)return;if($("srch"))$("srch").placeholder=tab==="sms"?"Search SMS contacts":"Search chats";var c={all:0,personal:0,groups:0,shop:0};
   Object.keys(chats).forEach(function(n){var p=prefs[n]||{};if(p.a||p.m)return;if(chats[n].un||p.u){c[cat(n)]++;c.all++}});
-  var T=[["all","All"],["personal","Personal"],["groups","Groups"]];if(me!=="shop")T.push(["shop","Shop"]);
+  var T=[["all","All"],["personal","Personal"],["groups","Groups"]];if(me!=="shop")T.push(["shop","Shop"],["sms","SMS"]);
   if(me==="shop"&&tab==="shop")tab="personal";
   b.innerHTML=T.map(function(t){return '<button data-tab="'+t[0]+'" class="'+(tab===t[0]?'on':'')+'">'+t[1]+(c[t[0]]?'<span class="tb">'+c[t[0]]+'</span>':'')+'</button>'}).join("")}
 function loadStories(){if(!me)return;api("/api/statuses").then(function(d){var by={},ord=[];(d.items||[]).forEach(function(x){if(!by[x.owner]){by[x.owner]=[];ord.push(x.owner)}x._t=Date.now();by[x.owner].push(x)});window._st=by;window._ord=ord;renderStories()}).catch(function(){})}
@@ -637,6 +639,10 @@ function callIn(d){
   else if(d.kind==="ice"){if(pc&&pc.remoteDescription)pc.addIceCandidate(d.data).catch(function(){});else icq.push(d.data)}
   else if(d.kind==="end"||d.kind==="decline"||d.kind==="busy"||d.kind==="unavailable")endCall(false,d.kind==="busy"?"They are busy":d.kind==="decline"?"Call declined":d.kind==="unavailable"?"They are not online right now":"Call ended")}
 document.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;var id=b.id;
+  if(id==="sms_pick")return chooseSmsContacts();
+  if(id==="sms_import"){var v=$("sms_vcf");if(v)v.click();return}
+  if(id==="sms_manual")return addSmsContact();
+  if(b.dataset.smsPhone)return launchSms(b.dataset.smsPhone,$("sms_body")?$("sms_body").value.trim():smsDraft);
   if(id==="help_open")return openHelp();
   if(id==="help_send")return submitSupport();
   if(id==="help_admin_open")return openAdminInbox();
@@ -689,7 +695,16 @@ function renderShop(){
   h+='<button class="pri" id="order">Place order</button>';
   if($("shop")){$("shop").innerHTML=h;$("shop").hidden=false}
 }
-function openSms(){var p=prof[cur]||{},phone=String(p.phone||"").replace(/[^0-9+]/g,"");if(!phone){closeModal();status("This person has not added a phone number to Gumzo yet.");return}var draft=$("in")?$("in").value.trim():"";var url="sms:"+phone+(draft?"?body="+encodeURIComponent(draft):"");closeModal();window.location.href=url}
+var smsDraft="";
+function smsSavedContacts(){try{var v=JSON.parse(localStorage.getItem("gumzo_sms_contacts")||"[]");return Array.isArray(v)?v:[]}catch(e){return []}}
+function saveSmsContacts(items){try{localStorage.setItem("gumzo_sms_contacts",JSON.stringify(items.slice(0,10000)))}catch(e){status("Could not save all contacts. Try importing a smaller contacts file.")}}
+function smsDigits(v){return String(v||"").trim().replace(/[^0-9+]/g,"")}
+function renderSmsPanel(){var box=$("list"),filter=$("srch")?$("srch").value.trim().toLowerCase():"",contacts=smsSavedContacts();var h='<div class="sms-panel"><strong>Send a regular SMS</strong><p class="note">Choose a phone contact or enter a number. Gumzo opens the SMS app set on this phone; your carrier may charge.</p><div class="sms-controls"><button class="pri" id="sms_pick">Choose phone contacts</button><button class="act" id="sms_import">Import contacts (.vcf)</button><button class="act" id="sms_manual">Add a number</button><input id="sms_vcf" type="file" accept=".vcf,text/vcard" hidden></div><textarea id="sms_body" rows="3" maxlength="1200" placeholder="Type your SMS">'+esc(smsDraft)+'</textarea><div class="sms-contact-list">';var matches=contacts.filter(function(c){return (c.name+" "+c.phone).toLowerCase().indexOf(filter)>-1});h+=matches.length?matches.map(function(c){return '<button class="sms-contact" data-sms-phone="'+esc(c.phone)+'"><span class="sms-avatar">'+esc((c.name||c.phone||"?").slice(0,1).toUpperCase())+'</span><span><b>'+esc(c.name||c.phone)+'</b><small>'+esc(c.phone)+'</small></span><span class="sms-arrow">›</span></button>'}).join(""):'<p class="note">No saved contacts match. Choose contacts or add a number.</p>';h+='</div><p class="note">Contacts are saved only on this device. Choose contacts, import a .vcf contacts file, or add numbers manually. Search the list, then tap a person to open your phone’s SMS app.</p></div>';box.innerHTML=h}
+function chooseSmsContacts(){if(!navigator.contacts||!navigator.contacts.select){alert("This browser does not offer contact selection. Use Add a number, or open Gumzo on a supported Android browser.");return}navigator.contacts.select(["name","tel"],{multiple:true}).then(function(rows){var old=smsSavedContacts(),by={};old.forEach(function(c){by[smsDigits(c.phone)]=c});rows.forEach(function(c){(c.tel||[]).forEach(function(t){var phone=smsDigits(t);if(phone)by[phone]={name:(c.name||[])[0]||phone,phone:phone}})});saveSmsContacts(Object.keys(by).filter(Boolean).map(function(k){return by[k]}));renderSmsPanel()}).catch(function(e){if(e&&e.name!=="AbortError")alert("Could not read the selected contacts. Please try again.")})}
+function addSmsContact(){var name=prompt("Contact name");if(name===null)return;var phone=smsDigits(prompt("Phone number, including country code if needed")||"");if(!phone){alert("Enter a phone number first.");return}var a=smsSavedContacts(),old=a.findIndex(function(c){return smsDigits(c.phone)===phone}),item={name:name.trim()||phone,phone:phone};if(old>=0)a[old]=item;else a.unshift(item);saveSmsContacts(a);renderSmsPanel()}
+function importSmsVcf(file){if(!file)return;var rd=new FileReader();rd.onload=function(){var src=String(rd.result||"").replace(/\r\n[ \t]/g,"").replace(/\n[ \t]/g,""),blocks=src.match(/BEGIN:VCARD[\s\S]*?END:VCARD/gi)||[],a=smsSavedContacts(),by={};a.forEach(function(c){by[smsDigits(c.phone)]=c});var added=0;blocks.forEach(function(card){var lines=card.split(/\r?\n/),name="",phones=[];lines.forEach(function(line){var k=line.indexOf(":");if(k<0)return;var key=line.slice(0,k).toUpperCase(),base=key.split(";")[0],val=line.slice(k+1).replace(/\\[nN]/g," ").replace(/\\([,;\\])/g,"$1").trim();if(base==="FN")name=val;else if(base==="N"&&!name)name=val.split(";").reverse().filter(Boolean).join(" ");if(base==="TEL"){var phone=smsDigits(val);if(phone)phones.push(phone)}});phones.forEach(function(phone){by[phone]={name:name||phone,phone:phone};added++})});saveSmsContacts(Object.keys(by).filter(Boolean).map(function(k){return by[k]}));renderSmsPanel();status("Imported "+added+" phone number"+(added===1?"":"s")+" from contacts.")};rd.onerror=function(){alert("Could not read that contacts file.")};rd.readAsText(file)}
+function launchSms(phone,body){phone=smsDigits(phone);if(!phone){alert("This contact has no usable phone number.");return}window.location.href="sms:"+phone+(body?"?body="+encodeURIComponent(body):"")}
+function openSms(){var p=prof[cur]||{},phone=smsDigits(p.phone);if(!phone){closeModal();status("This person has not added a phone number to Gumzo yet. Use the SMS tab to add any phone number.");return}var draft=$("in")?$("in").value.trim():"";closeModal();launchSms(phone,draft)}
 function openChat(n){closeModal();$("app").classList.remove("community");if(prefs[n]&&prefs[n].u){prefs[n].u=false;tx({type:"pref",with:n,key:"u",on:false})}cur=n;replyTo=null;chat(n).un=0;tx({type:"read",with:n});if(!isG(n))tx({type:"presence",with:n});$("app").classList.add("open");renderList();renderMain()}
 
 /* ---------- sending ---------- */
@@ -992,6 +1007,7 @@ document.addEventListener("click",function(e){
   if(t.dataset.load){var m=chats[cur].m[+t.dataset.load];if(m){m.load=1;renderMsgs()}}
 });
 document.addEventListener("change",function(e){
+  if(e.target.id==="sms_vcf"){importSmsVcf(e.target.files&&e.target.files[0]);e.target.value=""}
   if(e.target.id==="help_kind"&&$("help_peer_box"))$("help_peer_box").hidden=e.target.value!=="restore_chat";
   if(e.target.id==="low"){low=e.target.checked;tx({type:"lowdata",on:low});status(low?"Low-data mode on":"Low-data mode off");renderList();renderMsgs()}
   if(e.target.id==="file"){sendFile(e.target.files[0])}
@@ -1000,6 +1016,7 @@ document.addEventListener("change",function(e){
 });
 document.addEventListener("input",function(e){
   if(e.target.id==="srch")renderList();
+  if(e.target.id==="sms_body")smsDraft=e.target.value;
   if(e.target.id==="emojiSearch")drawEmojiGrid(e.target.value);
   if(e.target.id==="in"&&!low&&Date.now()-lastTyping>1500&&cur&&!isG(cur)){lastTyping=Date.now();tx({type:"typing",to:cur})}
 });
@@ -1025,3 +1042,4 @@ if(token){say("Signing in…");connect()}
 </script>
 </body>
 </html>
+
