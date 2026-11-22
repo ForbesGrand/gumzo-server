@@ -388,6 +388,11 @@ async function handler(req, res) {
       return json(res, 200, { ok: true });
     }
 
+    if (p === "/api/ice") {
+      const ice = [{ urls: "stun:stun.l.google.com:19302" }];
+      if (process.env.TURN_URL) ice.push({ urls: process.env.TURN_URL.split(","), username: process.env.TURN_USER || "", credential: process.env.TURN_PASS || "" });
+      return json(res, 200, { iceServers: ice });
+    }
     if (p === "/api/statuses") {
       const r = await q("select s.id, s.owner, s.kind, s.text, s.bg, s.file_id, s.created, exists(select 1 from status_views v where v.status_id=s.id and v.viewer=$1) as seen from statuses s where s.expires_at > now() and (s.owner=$1 or exists(select 1 from messages m where (m.from_user=$1 and m.to_user=s.owner) or (m.from_user=s.owner and m.to_user=$1))) order by s.created", [user]);
       const mine = r.rows.filter((x) => x.owner === user).map((x) => x.id);
@@ -815,6 +820,19 @@ wss.on("connection", (ws) => {
         await q("insert into group_members(group_id,name) values($1,$2) on conflict do nothing", [gid, name]);
         await pushGroup(gid);
         return send({ type: "gjoined", key: "g:" + gid });
+      }
+
+      if (m.type === "call") {
+        const to = String(m.to || "").toLowerCase();
+        if (!to || to === name || !["offer", "answer", "ice", "end", "decline", "busy"].includes(m.kind)) return;
+        if ((await q("select 1 from blocks where (name=$1 and other=$2) or (name=$2 and other=$1)", [name, to])).rows.length) return;
+        const u = online.get(to);
+        if (!u || u.ws.readyState !== 1) {
+          if (m.kind === "offer") { send({ type: "call", from: to, kind: "unavailable" }); notify([to], name, "Missed call", name + " tried to call you").catch(() => {}); }
+          return;
+        }
+        u.ws.send(JSON.stringify({ type: "call", from: name, kind: m.kind, data: m.data, video: !!m.video }));
+        return;
       }
 
       if (m.type === "pin") {
