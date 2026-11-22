@@ -567,6 +567,11 @@ async function handler(req, res) {
       return json(res, 200, { ok: true });
     }
 
+    if (p === "/api/storage") {
+      const r = await q("select count(*)::int as n, coalesce(sum(size),0)::bigint as bytes from files where owner=$1", [user]);
+      return json(res, 200, { files: r.rows[0].n, bytes: Number(r.rows[0].bytes), limit: MAX_USER_STORE });
+    }
+
     if (p === "/api/me") {
       const r = await q("select name, phone, email, show_phone, avatar_v, theme, chat_bg, about, hide_seen, no_receipts from users where name=$1", [user]);
       const x = r.rows[0];
