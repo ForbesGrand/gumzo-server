@@ -145,6 +145,7 @@ async function setup() {
   await q("alter table users add column if not exists theme text not null default 'red'");
   await q("alter table users add column if not exists chat_bg text not null default 'default'");
   await q("alter table users add column if not exists last_seen timestamptz");
+  await q("alter table messages add column if not exists reply_to bigint");
   await q("alter table messages add column if not exists deleted_at timestamptz");
   await q("alter table messages add column if not exists edited_at timestamptz");
   await q("create table if not exists hidden(name text not null, msg_id bigint not null, primary key(name, msg_id))");
@@ -200,15 +201,15 @@ function serveBinary(req, res, buf, mime, name, cache) {
 }
 
 // Save a message, push it to the receiver if online (that makes it "delivered").
-async function deliver(from, to, text, kind, fileId, file) {
+async function deliver(from, to, text, kind, fileId, file, reply) {
   const u = online.get(to);
   const live = !!(u && u.ws.readyState === 1);
   const r = await q(
-    "insert into messages(from_user,to_user,text,kind,file_id,delivered_at) values($1,$2,$3,$4,$5," + (live ? "now()" : "null") + ") returning id, created",
-    [from, to, text, kind, fileId]
+    "insert into messages(from_user,to_user,text,kind,file_id,reply_to,delivered_at) values($1,$2,$3,$4,$5,$6," + (live ? "now()" : "null") + ") returning id, created",
+    [from, to, text, kind, fileId, reply || null]
   );
   const id = Number(r.rows[0].id), at = r.rows[0].created;
-  if (live) u.ws.send(JSON.stringify({ type: "msg", id, from, text, kind, file: file || null, at }));
+  if (live) u.ws.send(JSON.stringify({ type: "msg", id, from, text, kind, file: file || null, reply: reply || null, at }));
   return { id, at, st: live ? "delivered" : "sent" };
 }
 
@@ -484,7 +485,7 @@ wss.on("connection", (ws) => {
         }
 
         const h = await q(
-          'select m.id, m.from_user as "from", m.to_user as "to", m.text, m.kind, m.created as at, m.delivered_at, m.read_at, m.deleted_at, m.edited_at, f.id as fid, f.name as fname, f.mime as fmime, f.size as fsize ' +
+          'select m.id, m.from_user as "from", m.to_user as "to", m.text, m.kind, m.created as at, m.delivered_at, m.read_at, m.deleted_at, m.edited_at, m.reply_to, f.id as fid, f.name as fname, f.mime as fmime, f.size as fsize ' +
           "from messages m left join files f on f.id=m.file_id where (m.from_user=$1 or m.to_user=$1) " +
           "and not exists (select 1 from hidden hd where hd.name=$1 and hd.msg_id=m.id) " +
           "and m.id > coalesce((select c.up_to from cleared c where c.name=$1 and c.other = case when m.from_user=$1 then m.to_user else m.from_user end), 0) " +
@@ -498,7 +499,7 @@ wss.on("connection", (ws) => {
         const profiles = {};
         pr.rows.forEach((x) => { profiles[x.name] = { av: x.avatar_v, phone: x.phone }; });
         const msgs = h.rows.reverse().map((x) => ({
-          id: Number(x.id), from: x.from, to: x.to, text: x.deleted_at ? "" : x.text, kind: x.kind, at: x.at, edited: !!x.edited_at, deleted: !!x.deleted_at,
+          id: Number(x.id), from: x.from, to: x.to, text: x.deleted_at ? "" : x.text, kind: x.kind, at: x.at, edited: !!x.edited_at, deleted: !!x.deleted_at, reply: x.reply_to ? Number(x.reply_to) : null,
           st: x.read_at ? "read" : x.delivered_at ? "delivered" : "sent",
           file: x.fid && !x.deleted_at ? { id: Number(x.fid), name: x.fname, mime: x.fmime, size: x.fsize } : null,
         }));
@@ -524,8 +525,9 @@ wss.on("connection", (ws) => {
         if (to === name) return fail("You cannot message yourself");
         const ex = await q("select 1 from users where name=$1", [to]);
         if (!ex.rows.length) return fail("No user called " + to);
-        const d = await deliver(name, to, text, "msg", null, null);
-        return send({ type: "sent", cid: m.cid, id: d.id, to, text, kind: "msg", file: null, at: d.at, st: d.st });
+        const reply = parseInt(m.reply) || null;
+        const d = await deliver(name, to, text, "msg", null, null, reply);
+        return send({ type: "sent", cid: m.cid, id: d.id, to, text, kind: "msg", file: null, reply, at: d.at, st: d.st });
       }
 
       if (m.type === "presence") {
