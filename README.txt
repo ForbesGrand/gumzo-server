@@ -1,19 +1,12 @@
-Gumzo update: Community Board + Emoji picker
+Gumzo update: Voice, status replies, compose, chat selection, and emoji fix
 
-Replace these two files in the Gumzo GitHub project:
-- index.html
-- server.js
+Replace index.html and server.js in the Gumzo GitHub project with these files. Keep your existing package.json, manifest.json, service worker, and other files. The included server.js keeps the Community Board database setup from the previous update; the new voice/status/chat-list controls are in index.html.
 
-Keep your existing package.json, manifest.json, service worker, and other project files. The new Board tables are created automatically when the server starts; they use the same PostgreSQL database as the app.
+What changed
+- The voice-note control now uses a microphone outline similar to modern voice-message apps. It pulses while recording and shows a stop button to finish and send.
+- Viewers can react to or report a status, and can reply. A status reply is sent as a normal direct message with the status context, so it appears in the status owner's Gumzo inbox/chat.
+- A floating pencil button opens shortcuts for New chat, New group, New status, New community post, and Settings.
+- Use the top menu's “Select chats” option, then tap chats. You can also long-press/right-click a chat. The selection bar offers pin, archive/unarchive, read/unread, delete, or Done.
+- The emoji grid now loads when a chat opens and has a fixed scroll area so emoji results remain visible. It includes the categorized picker and selection animation from the previous update.
 
-Community Board
-- Open Board from the app's top bar.
-- Posts are text-only and up to 500 characters, with an area and a post type: Announcement, Event, For sale, or Help.
-- Posts are visible to signed-in Gumzo users. You can filter by area; leave the filter blank to see all areas.
-- You can chat with the author, remove your own post, or report someone else's post.
-- The app shows recent posts from the last 90 days, with up to 100 posts per request. Each account can post up to 10 times per hour.
-
-Emojis
-- Open the smiley button in a chat to browse emoji categories or search common emoji names.
-- The picker uses the phone's built-in color emoji and briefly animates the emoji when selected. Emoji appearance varies a little by phone.
-- Message reactions include more choices too.
+Status replies need Gumzo internet connection to send; they are app messages, not carrier SMS. Reports are recorded by the existing report system.
