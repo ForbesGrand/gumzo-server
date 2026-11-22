@@ -14,6 +14,9 @@ if (!process.env.DATABASE_URL) {
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
 pool.on("error", (e) => console.error("Database connection error:", e.message));
 const q = (sql, params) => pool.query(sql, params);
+let webpush = null;
+try { webpush = require("web-push"); } catch (e) { console.error("web-push is not installed: notifications are off"); }
+let vapid = null;
 
 const MAX_FILE = 8 * 1024 * 1024;          // biggest photo/video/file: 8 MB
 const MAX_AVATAR = 300 * 1024;             // profile picture: 300 KB (the app shrinks it first)
@@ -162,11 +165,17 @@ async function setup() {
   await q("update users set show_phone=true where show_phone=false"); // phone numbers are always findable
   await q("create table if not exists files(id bigserial primary key, owner text not null, to_user text not null, name text not null, mime text not null, size int not null, data bytea not null, created timestamptz default now())");
   await q("create table if not exists resets(name text primary key, code_hash text not null, expires timestamptz not null, tries int not null default 0)");
+  await q("create table if not exists kv(key text primary key, value text not null)");
+  await q("create table if not exists push_subs(endpoint text primary key, name text not null, sub text not null)");
+  await q("create table if not exists statuses(id bigserial primary key, owner text not null, kind text not null, text text not null default '', bg text not null default '#D32F2F', file_id bigint, created timestamptz default now(), expires_at timestamptz not null)");
+  await q("create table if not exists status_views(status_id bigint not null, viewer text not null, primary key(status_id, viewer))");
   await q("alter table messages add column if not exists expires_at timestamptz");
   await q("create table if not exists disappear(a text not null, b text not null default '', secs int not null, primary key(a, b))");
   await q("alter table files add column if not exists once boolean not null default false");
   await q("alter table files add column if not exists viewed boolean not null default false");
   await q("alter table prefs add column if not exists unread boolean not null default false");
+
+  try { await initPush(); } catch (e) { console.error("Push setup failed:", e.message); }
 
   // The shop account is created from the SHOP_PASSWORD you set in Render. Nobody can sign up as "shop".
   if (process.env.SHOP_PASSWORD) {
@@ -225,6 +234,7 @@ async function deliver(from, to, text, kind, fileId, file, reply) {
   );
   const id = Number(r.rows[0].id), at = r.rows[0].created;
   if (live) u.ws.send(JSON.stringify({ type: "msg", id, from, text, kind, file: file || null, reply: reply || null, exp: exp ? exp.getTime() : null, at }));
+  if (!live) notify([to], from, from === "shop" ? "Family Shop" : from, prevText(text, kind, file)).catch(() => {});
   return { id, at, st: live ? "delivered" : "sent", exp: exp ? exp.getTime() : null };
 }
 
@@ -353,6 +363,55 @@ async function handler(req, res) {
     try { user = await authUser(req, url); } catch (e) { return json(res, 500, { error: "Server problem" }); }
     if (!user) return json(res, 401, { error: "Please log in again" });
 
+    if (p === "/api/vapid") return json(res, 200, { key: vapid ? vapid.pub : null });
+    if (req.method === "POST" && p === "/api/push") {
+      const b = await readBody(req);
+      if (!b.sub || !b.sub.endpoint) return json(res, 400, { error: "Bad subscription" });
+      await q("insert into push_subs(endpoint,name,sub) values($1,$2,$3) on conflict (endpoint) do update set name=excluded.name, sub=excluded.sub", [b.sub.endpoint, user, JSON.stringify(b.sub)]);
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === "POST" && p === "/api/push-off") {
+      const b = await readBody(req);
+      await q("delete from push_subs where endpoint=$1 and name=$2", [String(b.endpoint || ""), user]);
+      return json(res, 200, { ok: true });
+    }
+
+    if (p === "/api/statuses") {
+      const r = await q("select s.id, s.owner, s.kind, s.text, s.bg, s.file_id, s.created, exists(select 1 from status_views v where v.status_id=s.id and v.viewer=$1) as seen from statuses s where s.expires_at > now() and (s.owner=$1 or exists(select 1 from messages m where (m.from_user=$1 and m.to_user=s.owner) or (m.from_user=s.owner and m.to_user=$1))) order by s.created", [user]);
+      const mine = r.rows.filter((x) => x.owner === user).map((x) => x.id);
+      const vv = {};
+      if (mine.length) (await q("select status_id, viewer from status_views where status_id = any($1)", [mine])).rows.forEach((x) => { (vv[x.status_id] = vv[x.status_id] || []).push(x.viewer); });
+      return json(res, 200, { items: r.rows.map((x) => ({ id: Number(x.id), owner: x.owner, kind: x.kind, text: x.text, bg: x.bg, file: x.file_id ? Number(x.file_id) : null, at: x.created, seen: x.seen || x.owner === user, views: x.owner === user ? vv[x.id] || [] : undefined })) });
+    }
+    if (req.method === "POST" && p === "/api/status") {
+      const ct = String(req.headers["content-type"] || "").split(";")[0].toLowerCase();
+      if (ct === "application/json") {
+        const b = await readBody(req);
+        const text = String(b.text || "").trim().slice(0, 300);
+        const bg = /^#[0-9a-fA-F]{6}$/.test(String(b.bg)) ? b.bg : "#D32F2F";
+        if (!text) return json(res, 400, { error: "Type something first" });
+        await q("insert into statuses(owner,kind,text,bg,expires_at) values($1,'text',$2,$3,now()+interval '24 hours')", [user, text, bg]);
+        return json(res, 200, { ok: true });
+      }
+      if (!ct.startsWith("image/")) return json(res, 400, { error: "Please choose a photo" });
+      const buf = await readRaw(req, MAX_FILE);
+      if (!buf || !buf.length) return json(res, 413, { error: "Photo is too big" });
+      const f = await q("insert into files(owner,to_user,name,mime,size,data) values($1,'status','status',$2,$3,$4) returning id", [user, ct, buf.length, buf]);
+      await q("insert into statuses(owner,kind,text,bg,file_id,expires_at) values($1,'image','','#000000',$2,now()+interval '24 hours')", [user, f.rows[0].id]);
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === "POST" && p === "/api/status/view") {
+      const b = await readBody(req);
+      await q("insert into status_views(status_id,viewer) select id,$1 from statuses where id=$2 and owner<>$1 on conflict do nothing", [user, parseInt(b.id)]);
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === "POST" && p === "/api/status/delete") {
+      const b = await readBody(req);
+      const r = await q("delete from statuses where id=$1 and owner=$2 returning file_id", [parseInt(b.id), user]);
+      if (r.rows[0] && r.rows[0].file_id) await q("delete from files where id=$1", [r.rows[0].file_id]);
+      return json(res, 200, { ok: true });
+    }
+
     if (p === "/api/me") {
       const r = await q("select name, phone, email, show_phone, avatar_v, theme, chat_bg, about, hide_seen, no_receipts from users where name=$1", [user]);
       const x = r.rows[0];
@@ -413,7 +472,7 @@ async function handler(req, res) {
       if (user === "shop") return json(res, 400, { error: "The shop account cannot be deleted" });
       const r = await q("select hash from users where name=$1", [user]);
       if (!r.rows.length || !check(String(b.password || ""), r.rows[0].hash)) return json(res, 401, { error: "Wrong password" });
-      for (const sql of ["delete from files where owner=$1 or to_user=$1", "delete from messages where from_user=$1 or to_user=$1", "delete from sessions where name=$1", "delete from resets where name=$1", "delete from hidden where name=$1", "delete from cleared where name=$1 or other=$1", "delete from reads where name=$1 or other=$1", "delete from prefs where name=$1 or other=$1", "delete from blocks where name=$1 or other=$1", "delete from users where name=$1"]) await q(sql, [user]);
+      for (const sql of ["delete from files where owner=$1 or to_user=$1", "delete from messages where from_user=$1 or to_user=$1", "delete from sessions where name=$1", "delete from resets where name=$1", "delete from hidden where name=$1", "delete from cleared where name=$1 or other=$1", "delete from reads where name=$1 or other=$1", "delete from prefs where name=$1 or other=$1", "delete from blocks where name=$1 or other=$1", "delete from status_views where viewer=$1", "delete from statuses where owner=$1", "delete from push_subs where name=$1", "delete from users where name=$1"]) await q(sql, [user]);
       const u = online.get(user);
       if (u) { online.delete(user); try { u.ws.close(); } catch (e) {} }
       return json(res, 200, { ok: true });
@@ -465,7 +524,7 @@ async function handler(req, res) {
       const r = await q("select name, mime, data, owner, to_user, once, viewed from files where id=$1", [m[1]]);
       const f = r.rows[0];
       if (!f) return json(res, 404, { error: "File not found" });
-      if (user !== f.owner && user !== f.to_user && !(f.to_user.startsWith("g:") && (await isMember(user, f.to_user)))) return json(res, 403, { error: "Not allowed" });
+      if (user !== f.owner && user !== f.to_user && !(f.to_user.startsWith("g:") && (await isMember(user, f.to_user))) && !(f.to_user === "status" && (await q("select 1 from messages m where (m.from_user=$1 and m.to_user=$2) or (m.from_user=$2 and m.to_user=$1) limit 1", [user, f.owner])).rows.length)) return json(res, 403, { error: "Not allowed" });
       if (f.once) {
         if (user === f.owner) return json(res, 403, { error: "Sent as view once" });
         if (f.viewed) return json(res, 410, { error: "This photo was already opened" });
@@ -485,6 +544,36 @@ const server = http.createServer((req, res) => {
   });
 });
 
+// ---------- Notifications ----------
+const prevText = (text, kind, file) => file ? (file.once ? "👁 Photo" : /^image\//.test(file.mime) ? "📷 Photo" : /^audio\//.test(file.mime) ? "🎤 Voice note" : "📎 " + file.name) : String(text).slice(0, 100);
+async function initPush() {
+  if (!webpush) return;
+  const r = await q("select value from kv where key='vapid'");
+  let v;
+  if (r.rows.length) v = JSON.parse(r.rows[0].value);
+  else {
+    const j = crypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ format: "jwk" });
+    v = { pub: Buffer.concat([Buffer.from([4]), Buffer.from(j.x, "base64url"), Buffer.from(j.y, "base64url")]).toString("base64url"), priv: j.d };
+    await q("insert into kv(key,value) values('vapid',$1)", [JSON.stringify(v)]);
+  }
+  vapid = v;
+  webpush.setVapidDetails("mailto:" + (process.env.MAIL_FROM || "admin@gumzo.app"), v.pub, v.priv);
+}
+async function notify(names, other, title, body) {
+  if (!webpush || !vapid) return;
+  for (const n of names) {
+    const u = online.get(n);
+    if (u && u.ws.readyState === 1) continue;
+    const mu = await q("select muted from prefs where name=$1 and other=$2", [n, other]);
+    if (mu.rows[0] && mu.rows[0].muted) continue;
+    const subs = await q("select endpoint, sub from push_subs where name=$1", [n]);
+    for (const s of subs.rows) {
+      try { await webpush.sendNotification(JSON.parse(s.sub), JSON.stringify({ title, body, tag: other })); }
+      catch (e) { if (e.statusCode === 404 || e.statusCode === 410) await q("delete from push_subs where endpoint=$1", [s.endpoint]); }
+    }
+  }
+}
+
 // ---------- Disappearing messages ----------
 const dkey = (x, y) => (y.startsWith("g:") ? [y, ""] : x < y ? [x, y] : [y, x]);
 async function expiryFor(from, to) {
@@ -496,6 +585,9 @@ async function cleanup() {
   try {
     await q("delete from files where id in (select file_id from messages where expires_at < now() and file_id is not null)");
     await q("delete from messages where expires_at < now()");
+    await q("delete from files where id in (select file_id from statuses where expires_at < now() and file_id is not null)");
+    await q("delete from statuses where expires_at < now()");
+    await q("delete from status_views where status_id not in (select id from statuses)");
   } catch (e) { console.error("Cleanup failed:", e.message); }
 }
 
@@ -522,6 +614,8 @@ async function deliverGroup(from, key, text, kind, fileId, file, reply) {
   const ms = await q("select name from group_members where group_id=$1 and name<>$2", [key.slice(2), from]);
   const out = JSON.stringify({ type: "msg", id, from, to: key, text, kind, file: file || null, reply: reply || null, exp: exp ? exp.getTime() : null, at });
   ms.rows.forEach((x) => { const u = online.get(x.name); if (u && u.ws.readyState === 1) u.ws.send(out); });
+  const gn = (await q("select name from chat_groups where id=$1", [key.slice(2)])).rows[0];
+  notify(ms.rows.map((x) => x.name), key, gn ? gn.name : "Group", from + ": " + prevText(text, kind, file)).catch(() => {});
   return { id, at, st: "sent", exp: exp ? exp.getTime() : null };
 }
 // Tell the other side (one person, or every group member) that a message was edited or deleted.

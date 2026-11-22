@@ -1,5 +1,5 @@
 // Gumzo service worker: always tries the network first so new versions show up, falls back to the saved copy when offline.
-const V = "gumzo-v3";
+const V = "gumzo-v4";
 self.addEventListener("install", (e) => {
   self.skipWaiting();
   e.waitUntil(caches.open(V).then((c) => c.addAll(["/", "/manifest.json", "/icon-192.png"])).catch(() => {}));
@@ -15,4 +15,13 @@ self.addEventListener("fetch", (e) => {
       .then((r) => { if (r.ok) { const c = r.clone(); caches.open(V).then((x) => x.put(e.request, c)); } return r; })
       .catch(() => caches.match(e.request).then((r) => r || caches.match("/")))
   );
+});
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data.json(); } catch (x) {}
+  e.waitUntil(self.registration.showNotification(d.title || "Gumzo", { body: d.body || "", icon: "/icon-192.png", badge: "/icon-192.png", tag: d.tag }));
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then((l) => { for (const c of l) if ("focus" in c) return c.focus(); return clients.openWindow("/"); }));
 });

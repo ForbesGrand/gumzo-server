@@ -82,6 +82,9 @@ input[type=checkbox]{width:auto}
 .m audio{display:block;width:240px;max-width:100%;margin-bottom:4px}.m a{color:inherit;text-decoration:underline}
 .sn{font-size:12px;font-weight:700;color:var(--red)}
 .rx{margin-top:3px;font-size:13px}.rx span{background:rgba(0,0,0,.07);border-radius:10px;padding:1px 6px;margin-right:4px}
+#sv{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;justify-content:center;align-items:center;cursor:pointer;color:#fff}
+#sv img{max-width:100vw;max-height:84vh;object-fit:contain}.svt{font-size:28px;font-weight:700;text-align:center;padding:24px;max-width:620px;white-space:pre-wrap;word-break:break-word}
+.svf{position:absolute;bottom:calc(16px + env(safe-area-inset-bottom,0px));left:0;right:0;text-align:center;font-size:13px;padding:0 16px}.svx{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));right:16px;font-size:28px;color:#fff}
 .lbl{display:inline-block;cursor:pointer;text-align:center}
 .cen{display:flex;gap:10px;justify-content:center;align-items:center}
 #lb{position:fixed;inset:0;background:#000;display:grid;place-items:center;z-index:30;cursor:zoom-out}
@@ -163,6 +166,7 @@ html[data-theme=yellow] .hdr{background:linear-gradient(125deg,var(--red),color-
       <input id="srch" placeholder="Search chats" aria-label="Search chats" autocomplete="off">
       <div class="row2"><input id="nc" placeholder="Friend’s name or phone number" aria-label="Friend’s name or phone number" autocomplete="off" autocapitalize="none"><button class="pri" id="start">Chat</button></div>
       <button class="lnk" id="newg" style="text-align:left">👥 New group</button>
+      <button class="lnk" id="statb" style="text-align:left">📸 Status</button>
       <button class="lnk" id="starl" style="text-align:left">⭐ Starred messages</button>
       <p class="note" id="status"></p>
     </div>
@@ -173,6 +177,7 @@ html[data-theme=yellow] .hdr{background:linear-gradient(125deg,var(--red),color-
 
 <div id="modal" hidden></div>
 <div id="lb" hidden></div>
+<div id="sv" hidden></div>
 <input type="file" id="file" hidden>
 
 <script>
@@ -195,7 +200,7 @@ function pj(path,obj){return fetch(path,{method:"POST",headers:{"Content-Type":"
 function fileUrl(id){return "/api/file/"+id+"?token="+token}
 function size(n){return n<1024?n+" B":n<1048576?Math.round(n/1024)+" KB":(n/1048576).toFixed(1)+" MB"}
 try{token=localStorage.getItem("gz")||""}catch(e){}
-var dis={},onceNext=false,starred={},groups={},prefs={},blocked={},showArch=false,replyTo=null,rec=null,chunks=[],EMO=Array.from("😀😂🤣😍🥰😘😊😉😎🤔😢😭😡😴😅😇🙏👍👎👏🙌💪🤝👋👀🔥💖💔🎉✨💯✅❌🎁🙂😋😜🤗😱😬");
+var svList=[],svI=0,stBg="#D32F2F",dis={},onceNext=false,starred={},groups={},prefs={},blocked={},showArch=false,replyTo=null,rec=null,chunks=[],EMO=Array.from("😀😂🤣😍🥰😘😊😉😎🤔😢😭😡😴😅😇🙏👍👎👏🙌💪🤝👋👀🔥💖💔🎉✨💯✅❌🎁🙂😋😜🤗😱😬");
 var LOOK={theme:"red",bg:"default"},TC={red:"#D32F2F",blue:"#1976D2",yellow:"#F9A825",green:"#2E7D32"},pres={},typingUntil=0;
 function applyLook(t,b){
   if(!TC[t])t="red";if(!/^(default|red|blue|yellow|green)$/.test(b))b="default";
@@ -498,6 +503,7 @@ function openProfile(first){
     '<div class="cen"><label class="pri lbl">Choose photo<input type="file" id="avin" accept="image/*" hidden></label>'+(d.av?'<button class="lnk" id="avrm">Remove</button>':'')+'</div>'+
     '<p class="note">App colour</p><div class="sws">'+chips("theme")+'</div>'+
     '<p class="note">Chat background</p><div class="sws">'+chips("bg")+'</div>'+
+    '<button class="act" id="push_on">🔔 Turn on notifications on this device</button>'+
     '<label class="note">Phone number (needed, friends can see it and find you with it)<input id="p_phone" type="tel" placeholder="e.g. 0712 345 678" autocomplete="tel"></label>'+
     '<label class="note">Email (used to reset your password)<input id="p_email" type="email" autocapitalize="none" autocomplete="email"></label>'+
     '<label class="note">About<input id="p_about" maxlength="100" placeholder="Hey there! I am using Gumzo"></label>'+
@@ -545,6 +551,42 @@ function openGroup(){
   if(adm)h+='<div class="row2"><input id="g_add" placeholder="Add a friend by name" autocapitalize="none"><button class="pri" id="g_addb">Add</button></div>';
   modal(h+'<button class="act dng" id="g_leave">Leave group</button><button class="lnk" id="p_close">Close</button></div>');
 }
+function u8(b){var p="=".repeat((4-b.length%4)%4),r=atob((b+p).replace(/-/g,"+").replace(/_/g,"/")),o=new Uint8Array(r.length);for(var i=0;i<r.length;i++)o[i]=r.charCodeAt(i);return o}
+function enablePush(){
+  if(!("serviceWorker" in navigator)||!("PushManager" in window)){pmsg("This browser can't show notifications. On iPhone, add Gumzo to the Home Screen first.");return}
+  Notification.requestPermission().then(function(p){
+    if(p!=="granted"){pmsg("Notifications are blocked. Allow them in your browser settings.");return}
+    return api("/api/vapid").then(function(k){if(!k.key)throw 0;return navigator.serviceWorker.ready.then(function(r){return r.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:u8(k.key)})})})
+    .then(function(s){return post("/api/push",{sub:s.toJSON()})}).then(function(){pmsg("Notifications are on ✓")});
+  }).catch(function(){pmsg("Could not turn on notifications")});
+}
+function unpush(){
+  if(!("serviceWorker" in navigator))return Promise.resolve();
+  return navigator.serviceWorker.ready.then(function(r){return r.pushManager.getSubscription()}).then(function(s){return s?post("/api/push-off",{endpoint:s.endpoint}).then(function(){return s.unsubscribe()}):0}).catch(function(){});
+}
+function openStatus(){
+  modal('<div class="sheet"><p class="note">Loading…</p></div>');
+  api("/api/statuses").then(function(d){
+    var by={},ord=[];(d.items||[]).forEach(function(x){if(!by[x.owner]){by[x.owner]=[];ord.push(x.owner)}by[x.owner].push(x)});window._st=by;
+    var h='<div class="sheet"><strong style="font-size:18px">Status</strong><p class="note">Posts disappear after 24 hours. People you have chatted with can see them.</p><div class="cen"><button class="pri" id="st_text">✍️ Text</button><label class="pri lbl">📷 Photo<input type="file" id="stfile" accept="image/*" hidden></label></div>';
+    if(by[me])h+='<button class="act" data-sv="'+esc(me)+'">My status ('+by[me].length+') · tap to view</button>';
+    ord.filter(function(o){return o!==me}).forEach(function(o){var un=by[o].some(function(x){return !x.seen});h+='<button class="act" data-sv="'+esc(o)+'">'+(un?'🔴 ':'')+'<span style="'+(un?'font-weight:700':'')+'">'+esc(label(o))+'</span> · '+by[o].length+'</button>'});
+    if(!ord.length)h+='<p class="note">No status updates yet.</p>';
+    modal(h+'<p class="note" id="p_msg"></p><button class="lnk" id="p_close">Close</button></div>');
+  }).catch(function(){closeModal();status("Could not load status")});
+}
+function postPhoto(f){
+  if(!f)return;pmsg("Posting…");
+  shrink(f,1280,.8,false).then(function(b){return fetch("/api/status",{method:"POST",headers:hdrs({"Content-Type":"image/jpeg"}),body:b}).then(function(r){return r.json()})})
+  .then(function(d){if(d.error){pmsg(d.error);return}openStatus()}).catch(function(){pmsg("Could not post that photo")});
+}
+function showSv(){
+  var x=svList[svI];if(!x){$("sv").hidden=true;return}
+  var body=x.kind==="text"?'<div class="svt">'+esc(x.text)+'</div>':'<img src="'+fileUrl(x.file)+'" alt="Status photo">';
+  var foot=x.owner===me?'<div class="svf">👁 '+(x.views||[]).length+((x.views||[]).length?' · '+esc(x.views.join(", ")):'')+' <button class="lnk" data-sdel="'+x.id+'" style="color:#fff">Delete</button></div>':'<div class="svf">'+esc(label(x.owner))+' · '+hm(x.at)+'</div>';
+  $("sv").style.background=x.kind==="text"?x.bg:"#000";$("sv").innerHTML=body+foot+'<button class="svx" id="svx" aria-label="Close">✕</button>';$("sv").hidden=false;
+  if(x.owner!==me&&!x.seen){x.seen=true;post("/api/status/view",{id:x.id}).catch(function(){})}
+}
 function openCard(n){
   var p=prof[n]||{};
   modal('<div class="sheet">'+avh(n,"big")+'<strong style="text-align:center;font-size:18px">'+esc(label(n))+'</strong><p class="note" style="text-align:center">'+(p.phone?'Phone: '+esc(p.phone):'No phone number added')+'</p>'+(p.about?'<p class="note" style="text-align:center">“'+esc(p.about)+'”</p>':'')+'<button class="lnk" id="p_close">Close</button></div>');
@@ -552,6 +594,7 @@ function openCard(n){
 
 /* ---------- events ---------- */
 document.addEventListener("click",function(e){
+  if(e.target.closest("#sv")&&!e.target.closest("button")){svI++;showSv();return}
   if(e.target.closest("#lb")){$("lb").hidden=true;$("lb").innerHTML="";return}
   var o=e.target.closest("[data-open]");
   if(o){$("lb").innerHTML='<img src="'+esc(o.dataset.open)+'" alt="">';$("lb").hidden=false;return}
@@ -561,6 +604,9 @@ document.addEventListener("click",function(e){
   var t=e.target.closest("button");if(!t)return;
   if(t.dataset.grm){tx({type:"gremove",id:cur,name:t.dataset.grm});closeModal();return}
   if(t.dataset.emo){var ii=$("in");if(ii){ii.value+=t.dataset.emo;ii.focus()}return}
+  if(t.dataset.sbg){stBg=t.dataset.sbg;document.querySelectorAll("button[data-sbg]").forEach(function(x){x.classList.toggle("on",x===t)});return}
+  if(t.dataset.sv){svList=(window._st||{})[t.dataset.sv]||[];svI=0;closeModal();showSv();return}
+  if(t.dataset.sdel){post("/api/status/delete",{id:+t.dataset.sdel}).then(function(){$("sv").hidden=true});return}
   if(t.dataset.theme)return setLook("theme",t.dataset.theme);
   if(t.dataset.bg)return setLook("bg",t.dataset.bg);
   var sm=chats[cur]&&chats[cur].m[selMsg];
@@ -617,7 +663,12 @@ document.addEventListener("click",function(e){
     case"back_login1":case"back_login2":case"back_login3":return pane("login");
     case"forgot":return doForgot();
     case"reset":return doReset();
-    case"logout":fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:token})}).then(function(){try{localStorage.removeItem("gz")}catch(e){}location.reload()});return;
+    case"logout":unpush().then(function(){return fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:token})})}).then(function(){try{localStorage.removeItem("gz")}catch(e){}location.reload()});return;
+    case"push_on":return enablePush();
+    case"statb":return openStatus();
+    case"st_text":stBg="#D32F2F";modal('<div class="sheet"><strong>Text status</strong><textarea id="st_in" maxlength="300" rows="4" placeholder="What is on your mind?" style="width:100%;padding:10px;border-radius:14px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"></textarea><div class="sws">'+["#D32F2F","#1976D2","#2E7D32","#F57F17","#6A1B9A"].map(function(c){return '<button class="chip" data-sbg="'+c+'"><i style="background:'+c+'"></i></button>'}).join("")+'</div><button class="pri" id="st_post">Post for 24 hours</button><button class="lnk" id="p_close">Cancel</button></div>');return;
+    case"st_post":var stx=$("st_in").value.trim();if(!stx)return;post("/api/status",{text:stx,bg:stBg}).then(function(d){if(d.error){status(d.error);return}openStatus()});return;
+    case"svx":$("sv").hidden=true;return;
     case"profbtn":case"meav":return openProfile();
     case"p_close":return closeModal();
     case"p_save":return saveProfile();
@@ -654,6 +705,7 @@ document.addEventListener("change",function(e){
   if(e.target.id==="low"){low=e.target.checked;tx({type:"lowdata",on:low});status(low?"Low-data mode on":"Low-data mode off");renderList();renderMsgs()}
   if(e.target.id==="file"){sendFile(e.target.files[0])}
   if(e.target.id==="avin"){setAvatar(e.target.files[0])}
+  if(e.target.id==="stfile"){postPhoto(e.target.files[0])}
 });
 document.addEventListener("input",function(e){
   if(e.target.id==="srch")renderList();
