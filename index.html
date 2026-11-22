@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Gumzo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap" rel="stylesheet">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#D4A017">
 <link rel="icon" href="/icon-192.png">
@@ -155,6 +157,9 @@ html,button,input,textarea{font-family:system-ui,-apple-system,"Segoe UI","Apple
 .support-sheet{width:min(94vw,650px);max-height:88vh;overflow:auto;gap:10px}.support-sheet textarea{width:100%;resize:vertical;min-height:52px}.support-sheet label{display:flex;flex-direction:column;gap:5px}.support-sheet #help_tickets,.support-sheet #admin_inbox{display:flex;flex-direction:column;gap:8px;max-height:38vh;overflow:auto}.ticket{padding:10px;border:1px solid #E7CC78;border-radius:14px;background:#FFF9E8;overflow-wrap:anywhere}.ticket small{display:block;color:#806A34;margin-top:3px}.ticket p{white-space:pre-wrap;margin:8px 0}.ticket-reply{border-left:3px solid #D4A017;padding-left:8px}.support-actions{display:flex;gap:8px;flex-wrap:wrap}.support-actions button{padding:7px 10px;border-radius:10px;background:#F5DF9A;color:#382900}
 .m{font-size:calc(16px*var(--fs,1))}.rm b,.bar input{font-size:calc(16px*var(--fs,1))}.rm small{font-size:calc(13px*var(--fs,1))}
 .stk{font-size:64px;line-height:1.1;text-align:center;padding:2px 6px}
+#join h1{font-family:'Great Vibes','Pinyon Script','Snell Roundhand','Brush Script MT',cursive;font-weight:400;font-size:76px;letter-spacing:0;line-height:1.05;text-align:center;padding:2px 0 6px}
+.hdr h2{font-family:'Great Vibes','Snell Roundhand','Brush Script MT',cursive;font-weight:400;font-size:34px;letter-spacing:0}
+.sms-bar{display:flex;gap:6px;flex-wrap:wrap;padding:10px 12px 4px}
 </style>
 </head>
 <body>
@@ -166,6 +171,7 @@ html,button,input,textarea{font-family:system-ui,-apple-system,"Segoe UI","Apple
     <input id="l_id" placeholder="Name, phone number or email" aria-label="Name, phone number or email" autocomplete="username" autocapitalize="none">
     <input id="l_pw" type="password" placeholder="Password" aria-label="Password" autocomplete="current-password">
     <button class="pri" id="login">Log in</button>
+    <p class="note" style="text-align:center;margin:8px 0 0">Don't have an account?</p>
     <button class="lnk" id="go_signup">Create account</button>
     <button class="lnk" id="go_forgot">Forgot password?</button>
   </div>
@@ -202,7 +208,6 @@ html,button,input,textarea{font-family:system-ui,-apple-system,"Segoe UI","Apple
     <div class="hdr">
       <button class="who" id="meav" aria-label="My profile"></button>
       <h2 class="grow">Gumzo</h2>
-      <button class="light" id="board_open" aria-label="Open Community Board">Board</button>
       <button class="light" id="hmenu" aria-label="Menu">⋮</button>
           </div>
     <div class="stories" id="stories"></div>
@@ -225,6 +230,7 @@ html,button,input,textarea{font-family:system-ui,-apple-system,"Segoe UI","Apple
 <input type="file" id="file" hidden>
 
 <script>
+var LANG="en";try{LANG=localStorage.getItem("gzlang")||"en"}catch(e){}
 var ws,me="",low=false,cur=null,lastTyping=0,catalog=[],chats={shop:{m:[],un:0}},prof={},cidN=0,token="",rid="";
 var MAXF=8*1024*1024,RANK={pending:0,sent:1,delivered:2,read:3};
 var $=function(i){return document.getElementById(i)};
@@ -447,6 +453,7 @@ function drawEmojiGrid(search){
   box.innerHTML=items.map(emojiButton).join("")||'<small class="note">No matching emojis</small>';
 }
 function renderMain(){
+  if(tab==="sms"&&smsCur){renderSmsThread();return}
   if(!cur){$("main").innerHTML='<div class="empty">Pick a chat, or type a friend’s name or phone number and tap Chat.</div>';return}
   $("main").innerHTML='<div class="hdr"><button class="back" id="back" aria-label="Back to chats">‹</button><button class="who" id="who">'+avh(cur)+'<span class="grow"><strong id="hn">'+esc(label(cur))+(dis[cur]?' ⏳':'')+'</strong><small id="st"></small></span></button>'+
   (cur==="shop"?'<button class="light" id="browse">Browse products</button>':'')+(cur==="shop"||isG(cur)?'':'<button class="light" id="call_a" aria-label="Voice call">📞</button><button class="light" id="call_v" aria-label="Video call">🎥</button>')+'<button class="light" id="chatmenu" aria-label="Chat options">⋮</button></div>'+
@@ -564,8 +571,8 @@ document.addEventListener("click",function(e){
 setInterval(loadStories,60000);
 /* ---------- home menu and colour ---------- */
 function applyColor(){var s=document.documentElement.style;["--red","--dk","--avbg","--me","--hover","--hink"].forEach(function(k){s.removeProperty(k)});var mt=document.querySelector("meta[name=theme-color]");if(mt)mt.content="#D4A017"}
-function homeMenu(){modal('<div class="sheet"><strong>Menu</strong><button class="act" id="newg">👥 New group</button><button class="act" id="select_chats">☑️ Select chats</button><button class="act" id="board_open_menu">📣 Community Board</button><button class="act" id="help_open">🛟 Help & support</button><button class="act" id="starl">⭐ Starred messages</button><button class="act" id="profbtn">⚙️ Settings</button><button class="lnk" id="p_close">Close</button></div>')}
-function openCompose(){modal('<div class="sheet"><strong>Start something new</strong><button class="act" id="compose_newchat">✉️ New chat</button><button class="act" id="compose_group">👥 New group</button><button class="act" id="compose_status">✍️ New status</button><button class="act" id="compose_board">📣 New community post</button><button class="act" id="compose_settings">⚙️ Settings</button><button class="lnk" id="p_close">Cancel</button></div>')}
+function homeMenu(){modal('<div class="sheet"><strong>Menu</strong><button class="act" id="newg">👥 New group</button><button class="act" id="select_chats">☑️ Select chats</button><button class="act" id="help_open">🛟 Help & support</button><button class="act" id="starl">⭐ Starred messages</button><button class="act" id="profbtn">⚙️ Settings</button><button class="lnk" id="p_close">Close</button></div>')}
+function openCompose(){modal('<div class="sheet"><strong>Start something new</strong><button class="act" id="compose_newchat">✉️ New chat</button><button class="act" id="compose_group">👥 New group</button><button class="act" id="compose_status">✍️ New status</button><button class="act" id="compose_settings">⚙️ Settings</button><button class="lnk" id="p_close">Cancel</button></div>')}
 function openHelp(){
   modal('<div class="sheet support-sheet"><strong style="font-size:19px">Help & support</strong><p class="note">Send Gumzo support a message. Replies will appear here.</p><label class="note">What do you need?<select id="help_kind"><option value="general">General help</option><option value="restore_chat">Restore a deleted chat</option></select></label><div id="help_peer_box" hidden><label class="note">Chat partner username or group ID<input id="help_peer" maxlength="40" placeholder="e.g. friend or g:12"></label><p class="note">We can restore messages hidden or cleared from your side if Gumzo still has them. Messages deleted for everyone, expired messages, and deleted accounts cannot be recovered.</p></div><label class="note">Subject<input id="help_subject" maxlength="120" placeholder="A short title"></label><label class="note">Tell us what happened<textarea id="help_message" maxlength="1600" rows="4" placeholder="Add any details that will help us"></textarea></label><button class="pri" id="help_send">Send to support</button><p class="note" id="help_msg"></p><div id="help_tickets"><p class="note">Loading your requests…</p></div><button class="act" id="help_admin_open" hidden>🛡️ Open staff inbox</button><button class="lnk" id="p_close">Close</button></div>');
   loadMySupport();api("/api/me").then(function(d){if(d.isAdmin&&$("help_admin_open"))$("help_admin_open").hidden=false}).catch(function(){});
@@ -645,7 +652,10 @@ document.addEventListener("click",function(e){var b=e.target.closest("button");i
   if(id==="sms_pick")return chooseSmsContacts();
   if(id==="sms_import"){var v=$("sms_vcf");if(v)v.click();return}
   if(id==="sms_manual")return addSmsContact();
-  if(b.dataset.smsPhone)return launchSms(b.dataset.smsPhone,$("sms_body")?$("sms_body").value.trim():smsDraft);
+  if(b.dataset.smsPhone)return openSmsThread(b.dataset.smsPhone);
+  if(id==="sms_go")return smsGo();
+  if(id==="sms_reply")return smsReply();
+  if(id==="sms_clear")return smsClear();
   if(id==="help_open")return openHelp();
   if(id==="help_send")return submitSupport();
   if(id==="help_admin_open")return openAdminInbox();
@@ -702,7 +712,35 @@ var smsDraft="";
 function smsSavedContacts(){try{var v=JSON.parse(localStorage.getItem("gumzo_sms_contacts")||"[]");return Array.isArray(v)?v:[]}catch(e){return []}}
 function saveSmsContacts(items){try{localStorage.setItem("gumzo_sms_contacts",JSON.stringify(items.slice(0,10000)))}catch(e){status("Could not save all contacts. Try importing a smaller contacts file.")}}
 function smsDigits(v){return String(v||"").trim().replace(/[^0-9+]/g,"")}
-function renderSmsPanel(){var box=$("list"),filter=$("srch")?$("srch").value.trim().toLowerCase():"",contacts=smsSavedContacts();var h='<div class="sms-panel"><strong>Send a regular SMS</strong><p class="note">Choose a phone contact or enter a number. Gumzo opens the SMS app set on this phone; your carrier may charge.</p><div class="sms-controls"><button class="pri" id="sms_pick">Choose phone contacts</button><button class="act" id="sms_import">Import contacts (.vcf)</button><button class="act" id="sms_manual">Add a number</button><input id="sms_vcf" type="file" accept=".vcf,text/vcard" hidden></div><textarea id="sms_body" rows="3" maxlength="1200" placeholder="Type your SMS">'+esc(smsDraft)+'</textarea><div class="sms-contact-list">';var matches=contacts.filter(function(c){return (c.name+" "+c.phone).toLowerCase().indexOf(filter)>-1});h+=matches.length?matches.map(function(c){return '<button class="sms-contact" data-sms-phone="'+esc(c.phone)+'"><span class="sms-avatar">'+esc((c.name||c.phone||"?").slice(0,1).toUpperCase())+'</span><span><b>'+esc(c.name||c.phone)+'</b><small>'+esc(c.phone)+'</small></span><span class="sms-arrow">›</span></button>'}).join(""):'<p class="note">No saved contacts match. Choose contacts or add a number.</p>';h+='</div><p class="note">Contacts are saved only on this device. Choose contacts, import a .vcf contacts file, or add numbers manually. Search the list, then tap a person to open your phone’s SMS app.</p></div>';box.innerHTML=h}
+var smsCur=null;
+function smsTh(){try{var v=JSON.parse(localStorage.getItem("gumzo_sms_threads")||"{}");return v&&typeof v==="object"?v:{}}catch(e){return {}}}
+function smsSaveTh(t){try{localStorage.setItem("gumzo_sms_threads",JSON.stringify(t))}catch(e){status("Could not save this SMS on the phone")}}
+function smsName(p){var c=smsSavedContacts().find(function(x){return smsDigits(x.phone)===p});return c&&c.name?c.name:p}
+function smsAdd(p,me,t){var a=smsTh();(a[p]=a[p]||[]).push({me:me,t:t,ts:Date.now()});smsSaveTh(a)}
+function renderSmsPanel(){
+  var box=$("list"),f=($("srch")?$("srch").value:"").trim().toLowerCase(),th=smsTh(),by={};
+  smsSavedContacts().forEach(function(c){var p=smsDigits(c.phone);if(p)by[p]=c.name||p});
+  Object.keys(th).forEach(function(p){if(!by[p])by[p]=p});
+  var last=function(p){var a=th[p]||[];return a[a.length-1]};
+  var keys=Object.keys(by).filter(function(p){return !f||(by[p]+" "+p).toLowerCase().indexOf(f)>-1}).sort(function(a,b){var x=last(a),y=last(b);return (y?y.ts:0)-(x?x.ts:0)||String(by[a]).localeCompare(by[b])});
+  var h='<div class="sms-bar"><button class="pri" id="sms_pick">Choose contacts</button><button class="act" id="sms_import">Import .vcf</button><button class="act" id="sms_manual">Add number</button><input id="sms_vcf" type="file" accept=".vcf,text/vcard" hidden></div><p class="note" style="padding:0 12px 6px">Chat with any phone number using your normal airtime or SMS bundle. Their replies arrive in your phone’s Messages app.</p>';
+  h+=keys.length?keys.map(function(p){var l=last(p);return '<button class="row'+(smsCur===p?' on':'')+'" data-sms-phone="'+esc(p)+'"><span class="av">'+esc(String(by[p]||"?").slice(0,1).toUpperCase())+'</span><span class="rw"><span class="rm"><b>'+esc(by[p])+'</b><small>'+(l?(l.me?'✓ ':'')+esc(l.t):esc(p))+'</small></span></span></button>'}).join(""):'<div class="empty">No contacts yet. Tap Choose contacts, Import .vcf or Add number.</div>';
+  box.innerHTML=h;
+}
+function openSmsThread(p){smsCur=smsDigits(p);$("app").classList.add("open");renderList();renderMain()}
+function renderSmsThread(){
+  var p=smsCur,n=smsName(p);
+  $("main").innerHTML='<div class="hdr"><button class="back" id="back" aria-label="Back to chats">‹</button><div class="who" style="cursor:default"><span class="av">'+esc(n.slice(0,1).toUpperCase())+'</span><span class="grow"><strong>'+esc(n)+'</strong><small>'+esc(p)+' · SMS</small></span></div><button class="light" id="sms_clear" aria-label="Delete thread">🗑</button></div><div class="msgs" id="smsmsgs"></div><div class="bar"><button class="clip" id="sms_reply" aria-label="Add their reply" title="Add their reply">↩</button><input id="sms_in" placeholder="Type an SMS" autocomplete="off"><button class="pri" id="sms_go">Send</button></div>';
+  drawSmsMsgs();
+}
+function drawSmsMsgs(){
+  var a=smsTh()[smsCur]||[],el=$("smsmsgs");if(!el)return;
+  el.innerHTML=a.length?a.map(function(m){return '<div class="m'+(m.me?' me':'')+'">'+esc(m.t)+'<time>'+hm(m.ts)+(m.me?' · SMS':'')+'</time></div>'}).join(""):'<div class="empty">No SMS yet. Type below and tap Send. Your phone’s SMS app opens so you can send it with your airtime. When they reply, tap ↩ to copy their reply here.</div>';
+  el.scrollTop=el.scrollHeight;
+}
+function smsGo(){var i=$("sms_in"),v=i&&i.value.trim();if(!v)return;smsAdd(smsCur,1,v);i.value="";drawSmsMsgs();renderSmsPanel();launchSms(smsCur,v)}
+function smsReply(){var t=prompt("Type or paste the reply you got from "+smsName(smsCur));if(!t||!t.trim())return;smsAdd(smsCur,0,t.trim());drawSmsMsgs();renderSmsPanel()}
+function smsClear(){if(!confirm("Delete this SMS thread from this phone?"))return;var a=smsTh();delete a[smsCur];smsSaveTh(a);smsCur=null;$("app").classList.remove("open");renderSmsPanel();renderMain()}
 function chooseSmsContacts(){if(!navigator.contacts||!navigator.contacts.select){alert("This browser does not offer contact selection. Use Add a number, or open Gumzo on a supported Android browser.");return}navigator.contacts.select(["name","tel"],{multiple:true}).then(function(rows){var old=smsSavedContacts(),by={};old.forEach(function(c){by[smsDigits(c.phone)]=c});rows.forEach(function(c){(c.tel||[]).forEach(function(t){var phone=smsDigits(t);if(phone)by[phone]={name:(c.name||[])[0]||phone,phone:phone}})});saveSmsContacts(Object.keys(by).filter(Boolean).map(function(k){return by[k]}));renderSmsPanel()}).catch(function(e){if(e&&e.name!=="AbortError")alert("Could not read the selected contacts. Please try again.")})}
 function addSmsContact(){var name=prompt("Contact name");if(name===null)return;var phone=smsDigits(prompt("Phone number, including country code if needed")||"");if(!phone){alert("Enter a phone number first.");return}var a=smsSavedContacts(),old=a.findIndex(function(c){return smsDigits(c.phone)===phone}),item={name:name.trim()||phone,phone:phone};if(old>=0)a[old]=item;else a.unshift(item);saveSmsContacts(a);renderSmsPanel()}
 function importSmsVcf(file){if(!file)return;var rd=new FileReader();rd.onload=function(){var src=String(rd.result||"").replace(/\r\n[ \t]/g,"").replace(/\n[ \t]/g,""),blocks=src.match(/BEGIN:VCARD[\s\S]*?END:VCARD/gi)||[],a=smsSavedContacts(),by={};a.forEach(function(c){by[smsDigits(c.phone)]=c});var added=0;blocks.forEach(function(card){var lines=card.split(/\r?\n/),name="",phones=[];lines.forEach(function(line){var k=line.indexOf(":");if(k<0)return;var key=line.slice(0,k).toUpperCase(),base=key.split(";")[0],val=line.slice(k+1).replace(/\\[nN]/g," ").replace(/\\([,;\\])/g,"$1").trim();if(base==="FN")name=val;else if(base==="N"&&!name)name=val.split(";").reverse().filter(Boolean).join(" ");if(base==="TEL"){var phone=smsDigits(val);if(phone)phones.push(phone)}});phones.forEach(function(phone){by[phone]={name:name||phone,phone:phone};added++})});saveSmsContacts(Object.keys(by).filter(Boolean).map(function(k){return by[k]}));renderSmsPanel();status("Imported "+added+" phone number"+(added===1?"":"s")+" from contacts.")};rd.onerror=function(){alert("Could not read that contacts file.")};rd.readAsText(file)}
@@ -780,6 +818,7 @@ function openProfile(first){
     '<div class="cen"><label class="pri lbl">Choose photo<input type="file" id="avin" accept="image/*" hidden></label>'+(d.av?'<button class="lnk" id="avrm">Remove</button>':'')+'</div>'+
     '<p class="note">App colour</p><div class="sws">'+chips("theme")+'</div>'+
     '<p class="note">Chat background</p><div class="sws">'+chips("bg")+'</div>'+
+    '<p class="note">Language</p><div class="sws"><button class="chip'+(LANG==="en"?' on':'')+'" data-lang="en">English</button><button class="chip'+(LANG==="sw"?' on':'')+'" data-lang="sw">Kiswahili</button></div>'+
     '<p class="note">Text size</p><div class="sws">'+[["0.9","Small"],["1","Normal"],["1.15","Large"],["1.3","Extra large"]].map(function(x){return '<button class="chip'+((localStorage.getItem("gzfs")||"1")===x[0]?' on':'')+'" data-fs="'+x[0]+'">'+x[1]+'</button>'}).join("")+'</div>'+
     '<p class="note" id="stor">Storage: checking…</p>'+
     '<button class="act" id="push_on">🔔 Turn on notifications on this device</button>'+
@@ -917,6 +956,7 @@ document.addEventListener("click",function(e){
   if(t.dataset.sbg){stBg=t.dataset.sbg;document.querySelectorAll("button[data-sbg]").forEach(function(x){x.classList.toggle("on",x===t)});return}
   if(t.dataset.sv){svList=(window._st||{})[t.dataset.sv]||[];svI=0;closeModal();showSv();return}
   if(t.dataset.sdel){post("/api/status/delete",{id:+t.dataset.sdel}).then(function(){$("sv").hidden=true;loadStories()});return}
+  if(t.dataset.lang){try{localStorage.setItem("gzlang",t.dataset.lang)}catch(e){}location.reload();return}
   if(t.dataset.fs){applyFs(t.dataset.fs);document.querySelectorAll("button[data-fs]").forEach(function(x){x.classList.toggle("on",x===t)});return}
   if(t.dataset.stk){
     if(!ws||ws.readyState!==1){status("Not connected yet. Try again in a moment.");return}
@@ -1003,7 +1043,7 @@ document.addEventListener("click",function(e){
     case"g_copy":{var gu=$("g_url");gu.select();try{navigator.clipboard.writeText(gu.value)}catch(e){document.execCommand("copy")}status("Link copied");return}
     case"g_addb":var an=$("g_add").value.trim();if(an)tx({type:"gadd",id:cur,name:an});closeModal();return;
     case"g_leave":if(confirm("Leave this group?")){tx({type:"gleave",id:cur});closeModal()}return;
-    case"back":$("app").classList.remove("open");return;
+    case"back":smsCur=null;$("app").classList.remove("open");if(tab==="sms")renderSmsPanel();return;
     case"send":return send();
     case"clip":onceNext=false;$("file").accept="";$("file").value="";$("file").click();return;
     case"once_m":onceNext=true;closeModal();$("file").accept="image/*";$("file").value="";$("file").click();return;
@@ -1045,6 +1085,7 @@ document.addEventListener("keydown",function(e){
   if(id==="sv_reply"){sendStatusReply();return}
   if(id==="in")send();
   else if(id==="ed_in")$("ed_save").click();
+  else if(id==="sms_in")$("sms_go").click();
   else if(id==="l_pw"||id==="l_id")doLogin();
   else if(id==="s_pw")doSignup();
   else if(id==="f_id")doForgot();
@@ -1058,6 +1099,20 @@ setInterval(function(){
 },20000);
 if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js");
 if(token){say("Signing in…");connect()}
+var LANG="en";try{LANG=localStorage.getItem("gzlang")||"en"}catch(e){}
+var SW={"Choose contacts":"Chagua anwani","Import .vcf":"Leta .vcf","Add number":"Ongeza namba","Type an SMS":"Andika SMS","Log in": "Ingia", "Create account": "Fungua akaunti", "Forgot password?": "Umesahau nenosiri?", "Don't have an account?": "Huna akaunti?", "Back to log in": "Rudi kuingia", "Send code": "Tuma msimbo", "I already have a code": "Tayari nina msimbo", "Change password": "Badilisha nenosiri", "Name, phone number or email": "Jina, namba ya simu au barua pepe", "Password": "Nenosiri", "6-digit code": "Msimbo wa tarakimu 6", "New password": "Nenosiri jipya", "New password (6 or more characters)": "Nenosiri jipya (herufi 6 au zaidi)", "Password (6 or more characters)": "Nenosiri (herufi 6 au zaidi)", "Your name": "Jina lako", "Your name (3 to 20 letters or numbers)": "Jina lako (herufi au namba 3 hadi 20)", "Phone number": "Namba ya simu", "Phone number, e.g. 0712 345 678": "Namba ya simu, mfano 0712 345 678", "Email": "Barua pepe", "Email (optional, also gets reset codes)": "Barua pepe (si lazima, pia hupokea misimbo)", "Log out": "Toka", "Log out?": "Toka?", "Chat": "Anza", "Search chats": "Tafuta mazungumzo", "Friend’s name or phone number": "Jina au namba ya simu ya rafiki", "Settings": "Mipangilio", "Menu": "Menyu", "Status": "Hali", "Starred messages": "Ujumbe uliotiwa nyota", "New group": "Kikundi kipya", "New chat": "Mazungumzo mapya", "Select chats": "Chagua mazungumzo", "New status": "Hali mpya", "Back to chats": "Rudi kwenye mazungumzo", "← Chats": "← Mazungumzo", "Archived": "Zilizohifadhiwa", "Loading…": "Inapakia…", "Help & support": "Msaada", "Voice call": "Simu ya sauti", "Video call": "Simu ya video", "Chat options": "Chaguo za mazungumzo", "My profile": "Wasifu wangu", "Pick a chat, or type a friend’s name or phone number and tap Chat.": "Chagua mazungumzo, au andika jina au namba ya simu ya rafiki kisha bonyeza Anza.", "No messages yet. Say hi 👋": "Hakuna ujumbe bado. Sema hujambo 👋", "Write a message": "Andika ujumbe", "Send": "Tuma", "Record a voice note": "Rekodi ujumbe wa sauti", "Send a photo, video or file": "Tuma picha, video au faili", "Emoji": "Emoji", "Search emojis": "Tafuta emoji", "Reply": "Jibu", "Forward": "Tuma mbele", "Forward to…": "Tuma mbele kwa…", "Delete for me only": "Futa kwangu tu", "Delete for everyone": "Futa kwa wote", "Edit message": "Hariri ujumbe", "Edit (up to 2 minutes after sending)": "Hariri (hadi dakika 2 baada ya kutuma)", "Cancel": "Ghairi", "Pin": "Bandika", "Archive": "Weka kumbukumbu", "Done": "Imekamilika", "Star message": "Tia nyota ujumbe", "Message": "Ujumbe", "This message was deleted": "Ujumbe huu umefutwa", "Delete": "Futa", "Remove": "Ondoa", "Add": "Ongeza", "Close": "Funga", "Save": "Hifadhi", "Copy link": "Nakili kiungo", "Report": "Ripoti", "Photo or video": "Picha au video", "Browse products": "Tazama bidhaa", "Place order": "Weka oda", "Products": "Bidhaa", "Disappearing messages": "Ujumbe unaopotea", "Group info and members": "Taarifa za kikundi na wanachama", "Leave group": "Ondoka kwenye kikundi", "Create group": "Unda kikundi", "Group name": "Jina la kikundi", "Invite link": "Kiungo cha mwaliko", "Change group picture": "Badilisha picha ya kikundi", "Friends’ names, separated by commas": "Majina ya marafiki, yakitenganishwa kwa koma", "Add a friend by name": "Ongeza rafiki kwa jina", "You will be the admin. You can add more people later.": "Utakuwa msimamizi. Unaweza kuongeza watu baadaye.", "admin": "msimamizi", "Group invite link": "Kiungo cha mwaliko wa kikundi", "Send my location": "Tuma mahali nilipo", "Send a sticker": "Tuma kibandiko", "Stickers": "Vibandiko", "Send a view-once photo": "Tuma picha ya kuona mara moja", "Tap to view once": "Gusa kuona mara moja", "Opened": "Imefunguliwa", "View once photo · sent": "Picha ya kuona mara moja · imetumwa", "Export this chat (text file)": "Hamisha mazungumzo haya (faili la maandishi)", "Delete this chat for me only": "Futa mazungumzo haya kwangu tu", "Send an SMS using my phone plan": "Tuma SMS kwa kifurushi cha simu yangu", "Send a regular SMS": "Tuma SMS ya kawaida", "Profile picture (optional)": "Picha ya wasifu (si lazima)", "Choose photo": "Chagua picha", "App colour": "Rangi ya programu", "Chat background": "Mandhari ya mazungumzo", "Text size": "Ukubwa wa maandishi", "Language": "Lugha", "Phone number (needed, friends can see it and find you with it)": "Namba ya simu (inahitajika, marafiki wanaiona na kukutafuta kwayo)", "Email (used to reset your password)": "Barua pepe (hutumika kubadilisha nenosiri)", "About": "Kuhusu mimi", "Hide my last seen and online status": "Ficha mara ya mwisho kuonekana na hali ya mtandaoni", "Do not send read receipts (no blue ticks)": "Usitume uthibitisho wa kusoma (hakuna alama za bluu)", "Delete my account": "Futa akaunti yangu", "Delete my account forever": "Futa akaunti yangu milele", "Delete your account?": "Futa akaunti yako?", "Low-data mode (photos and videos load only when you tap)": "Hali ya data kidogo (picha na video hupakiwa ukigusa tu)", "Storage: checking…": "Hifadhi: inakagua…", "Turn on notifications on this device": "Washa arifa kwenye kifaa hiki", "Choose phone contacts": "Chagua anwani za simu", "Text status": "Hali ya maandishi", "Post for 24 hours": "Weka kwa saa 24", "No status updates yet.": "Hakuna hali bado.", "My status": "Hali yangu", "What is on your mind?": "Unawaza nini?", "Report status": "Ripoti hali", "No starred messages yet. Tap a message and choose Star.": "Hakuna ujumbe uliotiwa nyota bado. Gusa ujumbe kisha chagua Nyota.", "Add a number": "Ongeza namba", "Subject": "Kichwa", "Tell us what happened": "Tuambie kilichotokea", "Send to support": "Tuma kwa msaada", "Support requests": "Maombi ya msaada", "My requests": "Maombi yangu"};
+function lookupSw(k){if(SW[k])return SW[k];var m=/^([^A-Za-z]*)(.*)$/.exec(k);return m[1]&&SW[m[2]]?m[1]+SW[m[2]]:null}
+function trNode(root){
+  var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null),n,list=[];
+  while(n=w.nextNode())list.push(n);
+  list.forEach(function(n){var p=n.parentElement;if(!p||p.closest(".m,.rm,.svt,.qt,textarea,script,style"))return;var t=n.nodeValue,k=t.trim();if(!k)return;var r=lookupSw(k);if(r)n.nodeValue=t.replace(k,r)});
+  if(root.querySelectorAll)root.querySelectorAll("[placeholder],[aria-label]").forEach(function(e){["placeholder","aria-label"].forEach(function(a){var v=e.getAttribute(a);if(v){var r=lookupSw(v);if(r)e.setAttribute(a,r)}})});
+}
+if(LANG==="sw"){
+  document.documentElement.lang="sw";
+  new MutationObserver(function(ms){ms.forEach(function(m){m.addedNodes.forEach(function(a){if(a.nodeType===1)trNode(a);else if(a.nodeType===3&&a.parentElement)trNode(a.parentElement)});if(m.type==="characterData"&&m.target.parentElement)trNode(m.target.parentElement)})}).observe(document.body,{childList:true,subtree:true,characterData:true});
+  trNode(document.body);
+}
 </script>
 </body>
 </html>
