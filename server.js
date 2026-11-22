@@ -170,6 +170,9 @@ async function setup() {
   await q("create table if not exists statuses(id bigserial primary key, owner text not null, kind text not null, text text not null default '', bg text not null default '#D32F2F', file_id bigint, created timestamptz default now(), expires_at timestamptz not null)");
   await q("alter table messages add column if not exists pinned boolean not null default false");
   await q("create table if not exists reports(id bigserial primary key, by_user text not null, who text not null, reason text not null, created timestamptz default now())");
+  await q("alter table reports add column if not exists status text not null default 'open'");
+  await q("alter table reports add column if not exists handled_by text");
+  await q("alter table reports add column if not exists handled_at timestamptz");
   await q("alter table chat_groups add column if not exists photo bytea");
   await q("alter table chat_groups add column if not exists photo_mime text");
   await q("alter table chat_groups add column if not exists photo_v int not null default 0");
@@ -182,6 +185,11 @@ async function setup() {
   await q("create table if not exists board_posts(id bigserial primary key, owner text not null, area text not null, category text not null, body text not null, created timestamptz default now(), deleted_at timestamptz)");
   await q("create index if not exists board_posts_recent on board_posts(created desc) where deleted_at is null");
   await q("create table if not exists board_reports(post_id bigint not null, reporter text not null, reason text not null default '', created timestamptz default now(), primary key(post_id,reporter))");
+  await q("alter table board_reports add column if not exists status text not null default 'open'");
+  await q("alter table board_reports add column if not exists handled_by text");
+  await q("alter table board_reports add column if not exists handled_at timestamptz");
+  await q("create table if not exists support_tickets(id bigserial primary key, owner text not null, kind text not null default 'general', subject text not null, message text not null, restore_peer text, status text not null default 'open', admin_reply text not null default '', created timestamptz default now(), updated timestamptz default now())");
+  await q("create index if not exists support_tickets_recent on support_tickets(created desc)");
   await q("alter table files add column if not exists once boolean not null default false");
   await q("alter table files add column if not exists viewed boolean not null default false");
   await q("alter table prefs add column if not exists unread boolean not null default false");
@@ -379,6 +387,9 @@ async function handler(req, res) {
     let user = null;
     try { user = await authUser(req, url); } catch (e) { return json(res, 500, { error: "Server problem" }); }
     if (!user) return json(res, 401, { error: "Please log in again" });
+    const adminName = String(process.env.ADMIN_USER || "").trim().toLowerCase();
+    const isAdmin = !!adminName && user === adminName;
+    if (p.startsWith("/api/admin/") && !isAdmin) return json(res, 403, { error: "The staff inbox is only available to the configured Gumzo admin." });
 
     if (p === "/api/board" && req.method === "GET") {
       const area = String(url.searchParams.get("area") || "").trim().slice(0, 48);
@@ -410,6 +421,75 @@ async function handler(req, res) {
       if (!exists.rows.length) return json(res, 404, { error: "That post is no longer available" });
       await q("insert into board_reports(post_id,reporter,reason) values($1,$2,$3) on conflict(post_id,reporter) do nothing", [id, user, String(b.reason || "").slice(0, 120)]);
       return json(res, 200, { ok: true });
+    }
+
+    if (req.method === "POST" && p === "/api/support") {
+      const b = await readBody(req);
+      const kind = String(b.kind || "general");
+      const subject = String(b.subject || "").trim().slice(0, 120);
+      const message = String(b.message || "").trim().slice(0, 1600);
+      const peer = String(b.restore_peer || "").trim().toLowerCase().slice(0, 40);
+      if (!["general", "restore_chat"].includes(kind)) return json(res, 400, { error: "Choose a valid support topic" });
+      if (!subject || !message) return json(res, 400, { error: "Add a subject and explain what happened" });
+      if (kind === "restore_chat" && !peer) return json(res, 400, { error: "Add the other person's username or the group ID" });
+      const count = await q("select count(*)::int as n from support_tickets where owner=$1 and created>now()-interval '1 hour'", [user]);
+      if (count.rows[0].n >= 10) return json(res, 429, { error: "Too many requests. Please try again later." });
+      const r = await q("insert into support_tickets(owner,kind,subject,message,restore_peer) values($1,$2,$3,$4,$5) returning id,created,status", [user, kind, subject, message, kind === "restore_chat" ? peer : null]);
+      return json(res, 200, { ok: true, ticket: { id: Number(r.rows[0].id), created: r.rows[0].created, status: r.rows[0].status } });
+    }
+    if (p === "/api/support/my" && req.method === "GET") {
+      const r = await q("select id,kind,subject,message,restore_peer,status,admin_reply,created,updated from support_tickets where owner=$1 order by created desc limit 50", [user]);
+      return json(res, 200, { tickets: r.rows.map((x) => ({ id: Number(x.id), kind: x.kind, subject: x.subject, message: x.message, restore_peer: x.restore_peer, status: x.status, admin_reply: x.admin_reply, created: x.created, updated: x.updated })) });
+    }
+    if (p === "/api/admin/inbox" && req.method === "GET") {
+      const [tickets, reports, board] = await Promise.all([
+        q("select id,owner,kind,subject,message,restore_peer,status,admin_reply,created,updated from support_tickets where status<>'closed' order by created desc limit 100"),
+        q("select id,by_user,who,reason,status,created from reports order by created desc limit 100"),
+        q("select r.post_id,r.reporter,r.reason,r.status,r.created,p.owner,p.area,p.body from board_reports r left join board_posts p on p.id=r.post_id order by r.created desc limit 100"),
+      ]);
+      return json(res, 200, { tickets: tickets.rows.map((x) => ({ ...x, id: Number(x.id) })), reports: reports.rows.map((x) => ({ ...x, id: Number(x.id) })), boardReports: board.rows.map((x) => ({ ...x, post_id: Number(x.post_id) })) });
+    }
+    if (p === "/api/admin/support/reply" && req.method === "POST") {
+      const b = await readBody(req), id = parseInt(b.id), reply = String(b.reply || "").trim().slice(0, 1600);
+      if (!reply) return json(res, 400, { error: "Write a reply first" });
+      const r = await q("update support_tickets set admin_reply=$2,status='answered',updated=now() where id=$1 and status<>'closed' returning id", [id, reply]);
+      if (!r.rows.length) return json(res, 404, { error: "Support request not found" });
+      return json(res, 200, { ok: true });
+    }
+    if (p === "/api/admin/support/close" && req.method === "POST") {
+      const b = await readBody(req);
+      const r = await q("update support_tickets set status='closed',updated=now() where id=$1 returning id", [parseInt(b.id)]);
+      if (!r.rows.length) return json(res, 404, { error: "Support request not found" });
+      return json(res, 200, { ok: true });
+    }
+    if (p === "/api/admin/report/review" && req.method === "POST") {
+      const b = await readBody(req), kind = String(b.kind || "");
+      let r;
+      if (kind === "app") r = await q("update reports set status='reviewed',handled_by=$2,handled_at=now() where id=$1 returning id", [parseInt(b.id), user]);
+      else if (kind === "board") r = await q("update board_reports set status='reviewed',handled_by=$3,handled_at=now() where post_id=$1 and reporter=$2 returning post_id", [parseInt(b.post_id), String(b.reporter || ""), user]);
+      else return json(res, 400, { error: "Unknown report type" });
+      if (!r.rows.length) return json(res, 404, { error: "Report not found" });
+      return json(res, 200, { ok: true });
+    }
+    if (p === "/api/admin/support/restore-chat" && req.method === "POST") {
+      const b = await readBody(req), id = parseInt(b.id);
+      const tr = await q("select owner,kind,restore_peer,status from support_tickets where id=$1", [id]);
+      const t = tr.rows[0];
+      if (!t || t.kind !== "restore_chat" || t.status !== "open") return json(res, 404, { error: "Open chat recovery request not found" });
+      const owner = t.owner, peer = String(t.restore_peer || "");
+      if (peer.startsWith("g:")) {
+        const member = await q("select 1 from group_members where name=$1 and ('g:'||group_id)=$2", [owner, peer]);
+        if (!member.rows.length) return json(res, 400, { error: "That user is no longer in the group" });
+      } else {
+        const contact = await q("select 1 from users where name=$1 and name<>$2", [peer, owner]);
+        if (!contact.rows.length) return json(res, 400, { error: "That chat partner no longer exists" });
+      }
+      const available = await q("select count(*)::int as n from messages where ((from_user=$1 and to_user=$2) or (from_user=$2 and to_user=$1) or ($2 like 'g:%' and to_user=$2)) and deleted_at is null and (expires_at is null or expires_at>now())", [owner, peer]);
+      await q("delete from hidden h using messages m where h.name=$1 and h.msg_id=m.id and ((m.from_user=$1 and m.to_user=$2) or (m.from_user=$2 and m.to_user=$1) or ($2 like 'g:%' and m.to_user=$2)) and m.deleted_at is null and (m.expires_at is null or m.expires_at>now())", [owner, peer]);
+      await q("delete from cleared where name=$1 and other=$2", [owner, peer]);
+      const reply = "Restored the messages still available in your chat with " + peer + ". Messages deleted for everyone or already expired cannot be recovered.";
+      await q("update support_tickets set status='answered',admin_reply=$2,updated=now() where id=$1", [id, reply]);
+      return json(res, 200, { ok: true, restored: available.rows[0].n, reply });
     }
 
     if (p === "/api/vapid") return json(res, 200, { key: vapid ? vapid.pub : null });
@@ -490,7 +570,7 @@ async function handler(req, res) {
     if (p === "/api/me") {
       const r = await q("select name, phone, email, show_phone, avatar_v, theme, chat_bg, about, hide_seen, no_receipts from users where name=$1", [user]);
       const x = r.rows[0];
-      return json(res, 200, { name: x.name, phone: x.phone, email: x.email, show_phone: x.show_phone, av: x.avatar_v, theme: x.theme, bg: x.chat_bg, about: x.about, hide_seen: x.hide_seen, no_receipts: x.no_receipts });
+      return json(res, 200, { name: x.name, phone: x.phone, email: x.email, show_phone: x.show_phone, av: x.avatar_v, theme: x.theme, bg: x.chat_bg, about: x.about, hide_seen: x.hide_seen, no_receipts: x.no_receipts, isAdmin });
     }
 
     if (p === "/api/find") {
@@ -549,7 +629,7 @@ async function handler(req, res) {
       if (!r.rows.length || !check(String(b.password || ""), r.rows[0].hash)) return json(res, 401, { error: "Wrong password" });
       const why = String(b.reason || "");
       if (["Using another app", "Privacy worries", "Do not use it enough"].includes(why)) await q("insert into delete_reasons(reason) values($1)", [why]);
-      for (const sql of ["delete from files where owner=$1 or to_user=$1", "delete from messages where from_user=$1 or to_user=$1", "delete from sessions where name=$1", "delete from resets where name=$1", "delete from hidden where name=$1", "delete from cleared where name=$1 or other=$1", "delete from reads where name=$1 or other=$1", "delete from prefs where name=$1 or other=$1", "delete from blocks where name=$1 or other=$1", "delete from status_views where viewer=$1", "delete from statuses where owner=$1", "delete from push_subs where name=$1", "delete from users where name=$1"]) await q(sql, [user]);
+      for (const sql of ["delete from files where owner=$1 or to_user=$1", "delete from messages where from_user=$1 or to_user=$1", "delete from sessions where name=$1", "delete from resets where name=$1", "delete from hidden where name=$1", "delete from cleared where name=$1 or other=$1", "delete from reads where name=$1 or other=$1", "delete from prefs where name=$1 or other=$1", "delete from blocks where name=$1 or other=$1", "delete from status_views where viewer=$1", "delete from statuses where owner=$1", "delete from support_tickets where owner=$1", "delete from push_subs where name=$1", "delete from users where name=$1"]) await q(sql, [user]);
       const u = online.get(user);
       if (u) { online.delete(user); try { u.ws.close(); } catch (e) {} }
       return json(res, 200, { ok: true });
