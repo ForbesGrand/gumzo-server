@@ -148,6 +148,7 @@ html,button,input,textarea{font-family:system-ui,-apple-system,"Segoe UI","Apple
 .fab{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:max(22px,env(safe-area-inset-bottom));z-index:12;width:60px;height:60px;border-radius:50%;display:grid;place-items:center;background:#D4A017;color:#382900;box-shadow:0 5px 18px rgba(91,63,0,.28)}.fab svg{width:27px;height:27px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.app.open .fab,.app.community .fab{display:none}
 .mic-btn{width:42px;height:42px;flex:none;display:grid;place-items:center;border-radius:50%;color:#6D4C00;background:#F5DF9A}.mic-btn svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.mic-btn.recording{background:#D4A017;animation:micPulse 1s infinite}.mic-btn.recording svg{fill:currentColor}@keyframes micPulse{50%{box-shadow:0 0 0 7px rgba(212,160,23,.22)}}
 .svf{z-index:2;pointer-events:auto}.sv-reply{display:flex;gap:7px;max-width:560px;margin:10px auto 0;padding:6px;border-radius:24px;background:#FFF3C4;box-shadow:0 3px 14px rgba(0,0,0,.22)}.sv-reply input{flex:1;min-width:0;border:0;background:transparent!important;color:#382900!important;padding:8px 11px}.sv-reply button{padding:8px 13px;border-radius:18px;background:#D4A017;color:#382900;font-weight:700}.sv-reply input::placeholder{color:#806A34}
+.emojiBtn.flagEmoji{grid-template-rows:24px 10px;gap:1px;font-size:9px;line-height:10px;color:#725100!important}.flagEmoji img,.inlineFlag{width:32px;height:24px;object-fit:cover;border:1px solid #C8AC56;border-radius:3px}.inlineFlag{width:1.45em;height:.98em;vertical-align:-.12em;margin:0 .08em;border-radius:2px}
 .svc{bottom:170px}
 .selbar{display:flex;gap:5px;padding:8px;overflow-x:auto;position:sticky;top:0;background:#FFF3C4;z-index:3;border-bottom:1px solid #E7CC78}.selbar button{flex:none;padding:7px 9px;border-radius:12px;background:#F5DF9A;color:#382900;font-size:13px}.selbar .selcount{padding:7px 3px;font-weight:700}.row.selected{background:#F5DF9A}.selmark{width:22px;height:22px;border:2px solid #B88912;border-radius:50%;display:grid;place-items:center;flex:none;margin:0 4px;color:#382900}.row.selected .selmark{background:#D4A017}
 </style>
@@ -224,6 +225,9 @@ var ws,me="",low=false,cur=null,lastTyping=0,catalog=[],chats={shop:{m:[],un:0}}
 var MAXF=8*1024*1024,RANK={pending:0,sent:1,delivered:2,read:3};
 var $=function(i){return document.getElementById(i)};
 function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function flagCode(e){var a=Array.from(e);if(a.length!==2)return"";var x=a[0].codePointAt(0),y=a[1].codePointAt(0);if(x<127462||x>127487||y<127462||y>127487)return"";return String.fromCharCode(x-127397,y-127397).toLowerCase()}
+function emojiButton(e){var c=flagCode(e);return c?'<button class="emojiBtn flagEmoji" data-emo="'+e+'" aria-label="Flag '+c.toUpperCase()+'"><img loading="lazy" decoding="async" src="https://flagcdn.io/flags/4x3/'+c+'.svg" alt="'+c.toUpperCase()+'"><span>'+c.toUpperCase()+'</span></button>':'<button class="emojiBtn" data-emo="'+e+'" aria-label="Emoji '+e+'">'+e+'</button>'}
+function richText(s){return esc(s).replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>').replace(/(^|\s)@([a-z0-9_]{3,20})/gi,'$1<b class="mn">@$2</b>').replace(/[\u{1F1E6}-\u{1F1FF}]{2}/gu,function(e){var c=flagCode(e);return c?'<img class="inlineFlag" loading="lazy" decoding="async" src="https://flagcdn.io/flags/4x3/'+c+'.svg" alt="'+c.toUpperCase()+'">':e})}
 function now(){var d=new Date();return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)}
 function hm(s){var d=new Date(s);return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)}
 function chat(n){if(!chats[n])chats[n]={m:[],un:0};return chats[n]}
@@ -419,7 +423,7 @@ function renderList(){
   if(nA||showArch)h+='<button class="row" id="arch_t"><span class="rw"><span class="rm"><b>'+(showArch?'‹ Back to chats':'Archived ('+nA+')')+'</b></span></span></button>';
   Object.keys(chats).filter(function(n){return !!P(n).a===showArch&&(fl?label(n).toLowerCase().indexOf(fl)>-1:(tab==="all"||cat(n)===tab))}).sort(function(a,b){return (P(b).p?1:0)-(P(a).p?1:0)||(a==="shop"?-1:b==="shop"?1:lastId(b)-lastId(a))}).forEach(function(n){
     var lm=chats[n].m[chats[n].m.length-1];
-    h+='<button class="row'+(cur===n?' on':'')+(selectedChats[n]?' selected':'')+'" data-id="'+esc(n)+'">'+(selectMode?'<span class="selmark">'+(selectedChats[n]?'✓':'')+'</span>':'')+avh(n)+'<span class="rw"><span class="rm"><b>'+esc(label(n))+(P(n).p?' 📌':'')+(P(n).m?' 🔇':'')+'</b><small class="'+(chats[n].un||P(n).u?'unr':'')+'">'+(lm?(lm.me?tk(lm.st)+' ':'')+esc(preview(lm)):'No messages yet')+'</small></span>'+(chats[n].un?'<span class="badge">'+chats[n].un+'</span>':P(n).u?'<span class="badge">•</span>':'')+'</span></button>';
+    h+='<button class="row'+(cur===n?' on':'')+(selectedChats[n]?' selected':'')+'" data-id="'+esc(n)+'">'+(selectMode?'<span class="selmark">'+(selectedChats[n]?'✓':'')+'</span>':'')+avh(n)+'<span class="rw"><span class="rm"><b>'+esc(label(n))+(P(n).p?' 📌':'')+(P(n).m?' 🔇':'')+'</b><small class="'+(chats[n].un||P(n).u?'unr':'')+'">'+(lm?(lm.me?tk(lm.st)+' ':'')+richText(preview(lm)):'No messages yet')+'</small></span>'+(chats[n].un?'<span class="badge">'+chats[n].un+'</span>':P(n).u?'<span class="badge">•</span>':'')+'</span></button>';
   });
   if(!h)h='<p class="note" style="padding:16px">'+(tab==="groups"?"No groups yet. Tap “New group” to start one.":tab==="shop"?"The shop chat will appear here.":"No chats here yet.")+'</p>';
   $("list").innerHTML=h;
@@ -427,14 +431,14 @@ function renderList(){
 function emojiPicker(){
   var cats=Object.keys(EMOJIS);
   var initial=(EMOJIS[emojiCategory]||"").split(" ");
-  return '<div id="emo" hidden><input id="emojiSearch" placeholder="Search emojis" aria-label="Search emojis"><div id="emojiCats">'+cats.map(function(c){return '<button class="emocat'+(c===emojiCategory?' on':'')+'" data-emocat="'+c+'">'+c+'</button>'}).join('')+'</div><div id="emojiGrid">'+initial.map(function(e){return '<button class="emojiBtn" data-emo="'+e+'" aria-label="Emoji '+e+'">'+e+'</button>'}).join("")+'</div></div>';
+  return '<div id="emo" hidden><input id="emojiSearch" placeholder="Search emojis" aria-label="Search emojis"><div id="emojiCats">'+cats.map(function(c){return '<button class="emocat'+(c===emojiCategory?' on':'')+'" data-emocat="'+c+'">'+c+'</button>'}).join('')+'</div><div id="emojiGrid">'+initial.map(emojiButton).join("")+'</div></div>';
 }
 function drawEmojiGrid(search){
   var box=$("emojiGrid");if(!box)return;
   var q=String(search||"").trim().toLowerCase(),cat=q&&Object.keys(EMOJIS).find(function(c){return c.toLowerCase().indexOf(q)>-1}),items=q?(cat?EMOJIS[cat].split(" "):Object.keys(EMOJIS).reduce(function(a,c){return a.concat(EMOJIS[c].split(" "))},[])):(EMOJIS[emojiCategory]||"").split(" ");
   var names={heart:"❤️",love:"🥰",smile:"😀",happy:"😃",laugh:"😂",joy:"🤣",cry:"😭",sad:"😢",angry:"😡",cool:"😎",wink:"😉",kiss:"😘",hug:"🤗",think:"🤔",thumb:"👍",fire:"🔥",party:"🎉",celebrate:"🥳",food:"🍕",cat:"🐱",dog:"🐶",flag:"🇺🇬",pray:"🙏",thanks:"🙏",lovehands:"🫶",clap:"👏",money:"💸",gift:"🎁",sun:"☀️",rain:"🌧️",car:"🚗",football:"⚽",basketball:"🏀",music:"🎵",coffee:"☕",cake:"🎂",flower:"🌸",poop:"💩",robot:"🤖",ghost:"👻",heartbroken:"💔"};
   if(q)items=items.filter(function(e){return Object.keys(names).some(function(n){return n.indexOf(q)>-1&&names[n]===e})});
-  box.innerHTML=items.map(function(e){return '<button class="emojiBtn" data-emo="'+e+'" aria-label="Emoji '+e+'">'+e+'</button>'}).join("")||'<small class="note">No matching emojis</small>';
+  box.innerHTML=items.map(emojiButton).join("")||'<small class="note">No matching emojis</small>';
 }
 function renderMain(){
   if(!cur){$("main").innerHTML='<div class="empty">Pick a chat, or type a friend’s name or phone number and tap Chat.</div>';return}
@@ -567,7 +571,7 @@ function boardCards(items){
   var box=$("boardfeed");if(!box)return;
   if(!items.length){box.innerHTML='<p class="boardempty">No posts here yet. You can start the conversation.</p>';return}
   box.innerHTML=items.map(function(x){prof[x.owner]=prof[x.owner]||{};prof[x.owner].av=x.av;var mine=x.owner===me;
-    return '<article class="boardcard"><div class="boardcardhead">'+avh(x.owner)+'<div class="grow"><b>'+esc(x.owner)+'</b><small>'+esc(x.area)+' · '+esc(new Date(x.created).toLocaleString())+'</small></div><span class="boardtype">'+esc(x.category)+'</span></div><div class="boardbody">'+esc(x.body)+'</div><div class="boardactions">'+(mine?'<button data-board-delete="'+x.id+'">Remove</button>':'<button data-board-chat="'+esc(x.owner)+'">Chat</button><button data-board-report="'+x.id+'">Report</button>')+'</div></article>'
+    return '<article class="boardcard"><div class="boardcardhead">'+avh(x.owner)+'<div class="grow"><b>'+esc(x.owner)+'</b><small>'+esc(x.area)+' · '+esc(new Date(x.created).toLocaleString())+'</small></div><span class="boardtype">'+esc(x.category)+'</span></div><div class="boardbody">'+richText(x.body)+'</div><div class="boardactions">'+(mine?'<button data-board-delete="'+x.id+'">Remove</button>':'<button data-board-chat="'+esc(x.owner)+'">Chat</button><button data-board-report="'+x.id+'">Report</button>')+'</div></article>'
   }).join("");
 }
 function loadBoard(){
@@ -649,7 +653,7 @@ function pinBar(){var b=$("pinbar");if(!b||!cur)return;var pm=chat(cur).m.filter
 function renderMsgs(){pinBar();
   if(!cur||!$("msgs"))return;
   var h="";chats[cur].m.forEach(function(m,i){
-    h+='<div class="m'+(m.me?' me':'')+'" data-mi="'+i+'">'+(isG(cur)&&!m.me&&!m.del?'<div class="sn">'+esc(m.from||"")+'</div>':'')+(m.del?'<div class="dl">🚫 This message was deleted</div>':qhtml(m)+(m.file?fileHtml(m,i):'')+(m.t?'<div>'+esc(m.t).replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>').replace(/(^|\s)@([a-z0-9_]{3,20})/gi,'$1<b class="mn">@$2</b>')+'</div>':''))+rxhtml(m)+'<time>'+(starred[m.id]?'⭐ ':'')+(m.ed&&!m.del?'edited · ':'')+m.time+(m.me&&!m.del?' '+tk(m.st):'')+'</time></div>';
+    h+='<div class="m'+(m.me?' me':'')+'" data-mi="'+i+'">'+(isG(cur)&&!m.me&&!m.del?'<div class="sn">'+esc(m.from||"")+'</div>':'')+(m.del?'<div class="dl">🚫 This message was deleted</div>':qhtml(m)+(m.file?fileHtml(m,i):'')+(m.t?'<div>'+richText(m.t)+'</div>':''))+rxhtml(m)+'<time>'+(starred[m.id]?'⭐ ':'')+(m.ed&&!m.del?'edited · ':'')+m.time+(m.me&&!m.del?' '+tk(m.st):'')+'</time></div>';
   });
   var el=$("msgs");el.innerHTML=h||'<div class="empty">No messages yet. Say hi 👋</div>';el.scrollTop=el.scrollHeight;
 }
@@ -820,8 +824,8 @@ function showSv(){
   clearTimeout(window._pen);
   var x=svList[svI];if(!x){$("sv").hidden=true;$("sv").innerHTML="";return}
   var media=x.kind==="image"||x.kind==="video";
-  var body=x.kind==="text"?'<div class="svt">'+esc(x.text)+'</div>':x.kind==="video"?'<video src="'+fileUrl(x.file)+'" autoplay playsinline></video>':'<img src="'+fileUrl(x.file)+'" alt="Status photo">';
-  var cap=media&&x.text?'<div class="svc">'+esc(x.text)+'</div>':'';
+  var body=x.kind==="text"?'<div class="svt">'+richText(x.text)+'</div>':x.kind==="video"?'<video src="'+fileUrl(x.file)+'" autoplay playsinline></video>':'<img src="'+fileUrl(x.file)+'" alt="Status photo">';
+  var cap=media&&x.text?'<div class="svc">'+richText(x.text)+'</div>':'';
   var rem=300-(x.age||0)-(Date.now()-(x._t||Date.now()))/1000;
   var pen=x.owner===me&&media&&rem>0?'<button class="svx" id="svpen" aria-label="Edit caption" style="right:64px">✏️</button>':'';
   var foot;

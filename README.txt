@@ -1,12 +1,7 @@
-Gumzo update: Voice, status replies, compose, chat selection, and emoji fix
+Gumzo update: Country flag display fix
 
-Replace index.html and server.js in the Gumzo GitHub project with these files. Keep your existing package.json, manifest.json, service worker, and other files. The included server.js keeps the Community Board database setup from the previous update; the new voice/status/chat-list controls are in index.html.
+Replace index.html and server.js in your Gumzo GitHub project with these files. Keep your existing package.json, manifest.json, service worker, and other files. The server.js is included so this package contains the full current Gumzo source; it was not changed for the flag display update.
 
-What changed
-- The voice-note control now uses a microphone outline similar to modern voice-message apps. It pulses while recording and shows a stop button to finish and send.
-- Viewers can react to or report a status, and can reply. A status reply is sent as a normal direct message with the status context, so it appears in the status owner's Gumzo inbox/chat.
-- A floating pencil button opens shortcuts for New chat, New group, New status, New community post, and Settings.
-- Use the top menu's “Select chats” option, then tap chats. You can also long-press/right-click a chat. The selection bar offers pin, archive/unarchive, read/unread, delete, or Done.
-- The emoji grid now loads when a chat opens and has a fixed scroll area so emoji results remain visible. It includes the categorized picker and selection animation from the previous update.
+Country flags in the emoji picker now use small lazy-loaded SVG images, so the picker shows actual flags even if the phone cannot draw flag emoji. Messages, chat previews, Community Board posts, and status text also display flag pictures when they contain a country flag emoji. The saved/sent text remains the standard Unicode flag emoji.
 
-Status replies need Gumzo internet connection to send; they are app messages, not carrier SMS. Reports are recorded by the existing report system.
+Flag pictures load from FlagCDN (flagcdn.io), so the first display of each flag needs internet. The images are small and loaded as needed. The picker falls back to the country code text if the image cannot load.
