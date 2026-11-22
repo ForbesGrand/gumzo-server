@@ -169,7 +169,7 @@ function pj(path,obj){return fetch(path,{method:"POST",headers:{"Content-Type":"
 function fileUrl(id){return "/api/file/"+id+"?token="+token}
 function size(n){return n<1024?n+" B":n<1048576?Math.round(n/1024)+" KB":(n/1048576).toFixed(1)+" MB"}
 try{token=localStorage.getItem("gz")||""}catch(e){}
-var replyTo=null,rec=null,chunks=[],EMO=Array.from("😀😂🤣😍🥰😘😊😉😎🤔😢😭😡😴😅😇🙏👍👎👏🙌💪🤝👋👀🔥💖💔🎉✨💯✅❌🎁🙂😋😜🤗😱😬");
+var prefs={},blocked={},showArch=false,replyTo=null,rec=null,chunks=[],EMO=Array.from("😀😂🤣😍🥰😘😊😉😎🤔😢😭😡😴😅😇🙏👍👎👏🙌💪🤝👋👀🔥💖💔🎉✨💯✅❌🎁🙂😋😜🤗😱😬");
 var LOOK={theme:"red",bg:"default"},TC={red:"#D32F2F",blue:"#1976D2",yellow:"#F9A825",green:"#2E7D32"},pres={},typingUntil=0;
 function applyLook(t,b){
   if(!TC[t])t="red";if(!/^(default|red|blue|yellow|green)$/.test(b))b="default";
@@ -272,7 +272,7 @@ function handle(d){
   if(t==="joined"){me=d.name;$("join").hidden=true;$("app").hidden=false;status("Connected as "+me);renderList();renderMain();
     api("/api/me").then(function(x){if(!x||x.error)return;applyLook(x.theme,x.bg);if(me!=="shop"&&!x.phone)openProfile("Please add your phone number. Friends use it to find you, and it is how you reset a forgotten password.")}).catch(function(){});return}
   if(t==="history"){
-    chats={shop:{m:[],un:0}};prof=d.profiles||prof;
+    chats={shop:{m:[],un:0}};prof=d.profiles||prof;prefs=d.prefs||{};blocked={};(d.blocked||[]).forEach(function(b){blocked[b]=1});
     (d.msgs||[]).forEach(function(x){var o=x.from===me?x.to:x.from;chat(o).m.push({id:x.id,me:x.from===me?1:0,t:x.text,time:hm(x.at),ts:new Date(x.at).getTime(),st:x.st,kind:x.kind,file:x.file,ed:x.edited,del:x.deleted,rep:x.reply})});
     Object.keys(d.unread||{}).forEach(function(k){chat(k).un=+d.unread[k]});
     if(cur){chat(cur).un=0;tx({type:"read",with:cur});tx({type:"presence",with:cur})}
@@ -305,7 +305,7 @@ function handle(d){
     renderList();if(cur===d.by)renderMsgs();
   }
 }
-function loadProf(n){api("/api/user?name="+encodeURIComponent(n)).then(function(d){if(d.name){prof[n]={av:d.av,phone:d.phone};renderList()}}).catch(function(){})}
+function loadProf(n){api("/api/user?name="+encodeURIComponent(n)).then(function(d){if(d.name){prof[n]={av:d.av,phone:d.phone,about:d.about};renderList()}}).catch(function(){})}
 
 /* ---------- drawing ---------- */
 function lastId(n){var l=chats[n].m[chats[n].m.length-1];return l?(l.id||1e15):0}
@@ -313,9 +313,12 @@ function renderList(){
   if(me)$("meav").innerHTML=avh(me);
   var h="";
   var fl=($("srch")&&$("srch").value||"").trim().toLowerCase();
-  Object.keys(chats).filter(function(n){return !fl||label(n).toLowerCase().indexOf(fl)>-1}).sort(function(a,b){return a==="shop"?-1:b==="shop"?1:lastId(b)-lastId(a)}).forEach(function(n){
+  var P=function(n){return prefs[n]||{}};
+  var nA=Object.keys(chats).filter(function(n){return P(n).a}).length;
+  if(nA||showArch)h+='<button class="row" id="arch_t"><span class="rw"><span class="rm"><b>'+(showArch?'‹ Back to chats':'Archived ('+nA+')')+'</b></span></span></button>';
+  Object.keys(chats).filter(function(n){return !!P(n).a===showArch&&(!fl||label(n).toLowerCase().indexOf(fl)>-1)}).sort(function(a,b){return (P(b).p?1:0)-(P(a).p?1:0)||(a==="shop"?-1:b==="shop"?1:lastId(b)-lastId(a))}).forEach(function(n){
     var lm=chats[n].m[chats[n].m.length-1];
-    h+='<button class="row'+(cur===n?' on':'')+'" data-id="'+esc(n)+'">'+avh(n)+'<span class="rw"><span class="rm"><b>'+esc(label(n))+'</b><small class="'+(chats[n].un?'unr':'')+'">'+(lm?(lm.me?tk(lm.st)+' ':'')+esc(preview(lm)):'No messages yet')+'</small></span>'+(chats[n].un?'<span class="badge">'+chats[n].un+'</span>':'')+'</span></button>';
+    h+='<button class="row'+(cur===n?' on':'')+'" data-id="'+esc(n)+'">'+avh(n)+'<span class="rw"><span class="rm"><b>'+esc(label(n))+(P(n).p?' 📌':'')+(P(n).m?' 🔇':'')+'</b><small class="'+(chats[n].un?'unr':'')+'">'+(lm?(lm.me?tk(lm.st)+' ':'')+esc(preview(lm)):'No messages yet')+'</small></span>'+(chats[n].un?'<span class="badge">'+chats[n].un+'</span>':'')+'</span></button>';
   });
   $("list").innerHTML=h;
 }
@@ -455,13 +458,16 @@ function openProfile(first){
     '<p class="note">Chat background</p><div class="sws">'+chips("bg")+'</div>'+
     '<label class="note">Phone number (needed, friends can see it and find you with it)<input id="p_phone" type="tel" placeholder="e.g. 0712 345 678" autocomplete="tel"></label>'+
     '<label class="note">Email (used to reset your password)<input id="p_email" type="email" autocapitalize="none" autocomplete="email"></label>'+
-    '<p class="note" id="p_msg"></p><button class="pri" id="p_save">Save phone and email</button><button class="lnk" id="p_close">Close</button></div>');
-    $("p_phone").value=d.phone||"";$("p_email").value=d.email||"";if(first)pmsg(first);
+    '<label class="note">About<input id="p_about" maxlength="100" placeholder="Hey there! I am using Gumzo"></label>'+
+    '<label class="note chk"><input type="checkbox" id="p_hs"> Hide my last seen and online status</label>'+
+    '<label class="note chk"><input type="checkbox" id="p_nr"> Do not send read receipts (no blue ticks)</label>'+
+    '<p class="note" id="p_msg"></p><button class="pri" id="p_save">Save</button><button class="lnk" id="p_close">Close</button>'+(me==="shop"?'':'<button class="lnk" id="del_acc" style="color:var(--red)">Delete my account</button>')+'</div>');
+    $("p_about").value=d.about||"";$("p_hs").checked=!!d.hide_seen;$("p_nr").checked=!!d.no_receipts;$("p_phone").value=d.phone||"";$("p_email").value=d.email||"";if(first)pmsg(first);
   }).catch(function(){closeModal();status("Could not open your settings")});
 }
 function saveProfile(){
   pmsg("Saving…");
-  post("/api/profile",{phone:$("p_phone").value.trim(),email:$("p_email").value.trim()}).then(function(d){
+  post("/api/profile",{phone:$("p_phone").value.trim(),email:$("p_email").value.trim(),about:$("p_about").value.trim(),hide_seen:$("p_hs").checked,no_receipts:$("p_nr").checked}).then(function(d){
     if(d.error){pmsg(d.error);return}
     $("p_phone").value=d.phone||"";$("p_email").value=d.email||"";pmsg("Saved ✓");
   }).catch(function(){pmsg("Could not save. Try again.")});
@@ -487,7 +493,7 @@ function msgMenu(i){
 }
 function openCard(n){
   var p=prof[n]||{};
-  modal('<div class="sheet">'+avh(n,"big")+'<strong style="text-align:center;font-size:18px">'+esc(label(n))+'</strong><p class="note" style="text-align:center">'+(p.phone?'Phone: '+esc(p.phone):'No phone number added')+'</p><button class="lnk" id="p_close">Close</button></div>');
+  modal('<div class="sheet">'+avh(n,"big")+'<strong style="text-align:center;font-size:18px">'+esc(label(n))+'</strong><p class="note" style="text-align:center">'+(p.phone?'Phone: '+esc(p.phone):'No phone number added')+'</p>'+(p.about?'<p class="note" style="text-align:center">“'+esc(p.about)+'”</p>':'')+'<button class="lnk" id="p_close">Close</button></div>');
 }
 
 /* ---------- events ---------- */
@@ -508,6 +514,14 @@ document.addEventListener("click",function(e){
     case"act_reply":if(sm){replyTo={id:sm.id,txt:(sm.me?"You":label(cur))+": "+preview(sm)};showReply();if($("in"))$("in").focus()}closeModal();return;
     case"rb_x":replyTo=null;showReply();return;
     case"mic":return mic();
+    case"arch_t":showArch=!showArch;renderList();return;
+    case"pref_p":case"pref_a":case"pref_m":
+      var k=t.id.slice(5),o=prefs[cur]=prefs[cur]||{};o[k]=!o[k];tx({type:"pref",with:cur,key:k,on:!!o[k]});closeModal();
+      if(k==="a"){cur=null;$("app").classList.remove("open");renderMain()}renderList();return;
+    case"blk":blocked[cur]=!blocked[cur];tx({type:"block",with:cur,on:!!blocked[cur]});closeModal();status(blocked[cur]?"Blocked "+cur:"Unblocked "+cur);return;
+    case"del_acc":
+      var pw=prompt("Type your password to delete your account for good. This cannot be undone.");if(!pw)return;
+      post("/api/delete-account",{password:pw}).then(function(d){if(d.error){pmsg(d.error);return}try{localStorage.removeItem("gz")}catch(e){}location.reload()});return;
     case"emob":$("emo").hidden=!$("emo").hidden;return;
     case"loc_send":closeModal();return sendLoc();
     case"exp_chat":closeModal();return exportChat();
@@ -521,7 +535,7 @@ document.addEventListener("click",function(e){
       if(sm&&nt&&nt!==sm.t)tx({type:"edit",id:sm.id,text:nt});
       closeModal();return;
     case"chatmenu":
-      modal('<div class="sheet"><strong>'+esc(label(cur))+'</strong><button class="act" id="loc_send">📍 Send my location</button><button class="act" id="exp_chat">⬇️ Export this chat (text file)</button><button class="act dng" id="del_chat">Delete this chat for me only</button><p class="note">The other person keeps their copy. Messages you delete here stay on their phone.</p><button class="lnk" id="p_close">Cancel</button></div>');return;
+      modal('<div class="sheet"><strong>'+esc(label(cur))+'</strong><button class="act" id="pref_p">📌 '+(prefs[cur]&&prefs[cur].p?"Unpin":"Pin")+' chat</button><button class="act" id="pref_a">🗄️ '+(prefs[cur]&&prefs[cur].a?"Unarchive":"Archive")+' chat</button><button class="act" id="pref_m">🔇 '+(prefs[cur]&&prefs[cur].m?"Unmute":"Mute")+' chat</button>'+(cur==="shop"?'':'<button class="act dng" id="blk">🚫 '+(blocked[cur]?"Unblock ":"Block ")+esc(cur)+'</button>')+'<button class="act" id="loc_send">📍 Send my location</button><button class="act" id="exp_chat">⬇️ Export this chat (text file)</button><button class="act dng" id="del_chat">Delete this chat for me only</button><p class="note">The other person keeps their copy. Messages you delete here stay on their phone.</p><button class="lnk" id="p_close">Cancel</button></div>');return;
     case"del_chat":
       tx({type:"clear",with:cur});
       if(cur==="shop")chats.shop.m=[];else delete chats[cur];
@@ -547,7 +561,7 @@ document.addEventListener("click",function(e){
     case"start":
       var n=$("nc").value.trim();if(!n)return;
       api("/api/find?q="+encodeURIComponent(n)).then(function(d){
-        if(d.found&&d.name!==me){prof[d.name]={av:d.av,phone:d.phone};$("nc").value="";openChat(d.name)}
+        if(d.found&&d.name!==me){prof[d.name]={av:d.av,phone:d.phone,about:d.about};$("nc").value="";openChat(d.name)}
         else if(d.found)status("That is you 🙂");
         else status("No user found for "+n+". Check the spelling.");
       }).catch(function(){status("Could not check. Try again.")});

@@ -145,6 +145,11 @@ async function setup() {
   await q("alter table users add column if not exists theme text not null default 'red'");
   await q("alter table users add column if not exists chat_bg text not null default 'default'");
   await q("alter table users add column if not exists last_seen timestamptz");
+  await q("alter table users add column if not exists about text");
+  await q("alter table users add column if not exists hide_seen boolean not null default false");
+  await q("alter table users add column if not exists no_receipts boolean not null default false");
+  await q("create table if not exists prefs(name text not null, other text not null, pinned boolean not null default false, archived boolean not null default false, muted boolean not null default false, primary key(name, other))");
+  await q("create table if not exists blocks(name text not null, other text not null, primary key(name, other))");
   await q("alter table messages add column if not exists reply_to bigint");
   await q("alter table messages add column if not exists deleted_at timestamptz");
   await q("alter table messages add column if not exists edited_at timestamptz");
@@ -339,29 +344,29 @@ async function handler(req, res) {
     if (!user) return json(res, 401, { error: "Please log in again" });
 
     if (p === "/api/me") {
-      const r = await q("select name, phone, email, show_phone, avatar_v, theme, chat_bg from users where name=$1", [user]);
+      const r = await q("select name, phone, email, show_phone, avatar_v, theme, chat_bg, about, hide_seen, no_receipts from users where name=$1", [user]);
       const x = r.rows[0];
-      return json(res, 200, { name: x.name, phone: x.phone, email: x.email, show_phone: x.show_phone, av: x.avatar_v, theme: x.theme, bg: x.chat_bg });
+      return json(res, 200, { name: x.name, phone: x.phone, email: x.email, show_phone: x.show_phone, av: x.avatar_v, theme: x.theme, bg: x.chat_bg, about: x.about, hide_seen: x.hide_seen, no_receipts: x.no_receipts });
     }
 
     if (p === "/api/find") {
       const s = String(url.searchParams.get("q") || "").trim().toLowerCase();
-      const r = await q("select name, avatar_v, phone, show_phone from users where name=$1 or phone=$2 order by (name=$1) desc limit 1", [s, normPhone(s)]);
+      const r = await q("select name, avatar_v, phone, about from users where name=$1 or phone=$2 order by (name=$1) desc limit 1", [s, normPhone(s)]);
       if (!r.rows.length) return json(res, 200, { found: false });
       const x = r.rows[0];
-      return json(res, 200, { found: true, name: x.name, av: x.avatar_v, phone: x.phone });
+      return json(res, 200, { found: true, name: x.name, av: x.avatar_v, phone: x.phone, about: x.about });
     }
 
     if (p === "/api/user") {
-      const r = await q("select name, avatar_v, phone, show_phone from users where name=$1", [String(url.searchParams.get("name") || "").toLowerCase()]);
+      const r = await q("select name, avatar_v, phone, about from users where name=$1", [String(url.searchParams.get("name") || "").toLowerCase()]);
       if (!r.rows.length) return json(res, 404, { error: "No such user" });
       const x = r.rows[0];
-      return json(res, 200, { name: x.name, av: x.avatar_v, phone: x.phone });
+      return json(res, 200, { name: x.name, av: x.avatar_v, phone: x.phone, about: x.about });
     }
 
     if (req.method === "POST" && p === "/api/profile") {
       const b = await readBody(req);
-      const cur = (await q("select phone, email, show_phone from users where name=$1", [user])).rows[0];
+      const cur = (await q("select phone, email, show_phone, about, hide_seen, no_receipts from users where name=$1", [user])).rows[0];
       let phone = cur.phone, email = cur.email, show = true;
       if ("phone" in b) {
         const s = String(b.phone || "").trim();
@@ -371,9 +376,13 @@ async function handler(req, res) {
         const s = String(b.email || "").trim().toLowerCase();
         if (!s) email = null; else { if (!goodEmail(s)) return json(res, 400, { error: "That email doesn't look right" }); email = s; }
       }
+      let about = cur.about, hs = cur.hide_seen, nr = cur.no_receipts;
+      if ("about" in b) about = String(b.about || "").trim().slice(0, 100);
+      if ("hide_seen" in b) hs = !!b.hide_seen;
+      if ("no_receipts" in b) nr = !!b.no_receipts;
       try {
         if (b.removeAvatar) await q("update users set avatar=null, avatar_mime=null, avatar_v=avatar_v+1 where name=$1", [user]);
-        await q("update users set phone=$1, email=$2, show_phone=$3 where name=$4", [phone, email, show, user]);
+        await q("update users set phone=$1, email=$2, show_phone=$3, about=$4, hide_seen=$5, no_receipts=$6 where name=$7", [phone, email, show, about, hs, nr, user]);
       } catch (e) {
         if (e.code === "23505") return json(res, 409, { error: /phone/.test(e.constraint || "") ? "That phone number is already used by another account" : "That email is already used by another account" });
         throw e;
@@ -386,6 +395,17 @@ async function handler(req, res) {
       const theme = String(b.theme || "red"), bg = String(b.bg || "default");
       if (!["red", "blue", "yellow", "green"].includes(theme) || !["default", "red", "blue", "yellow", "green"].includes(bg)) return json(res, 400, { error: "Unknown colour" });
       await q("update users set theme=$1, chat_bg=$2 where name=$3", [theme, bg, user]);
+      return json(res, 200, { ok: true });
+    }
+
+    if (req.method === "POST" && p === "/api/delete-account") {
+      const b = await readBody(req);
+      if (user === "shop") return json(res, 400, { error: "The shop account cannot be deleted" });
+      const r = await q("select hash from users where name=$1", [user]);
+      if (!r.rows.length || !check(String(b.password || ""), r.rows[0].hash)) return json(res, 401, { error: "Wrong password" });
+      for (const sql of ["delete from files where owner=$1 or to_user=$1", "delete from messages where from_user=$1 or to_user=$1", "delete from sessions where name=$1", "delete from resets where name=$1", "delete from hidden where name=$1", "delete from cleared where name=$1 or other=$1", "delete from reads where name=$1 or other=$1", "delete from prefs where name=$1 or other=$1", "delete from blocks where name=$1 or other=$1", "delete from users where name=$1"]) await q(sql, [user]);
+      const u = online.get(user);
+      if (u) { online.delete(user); try { u.ws.close(); } catch (e) {} }
       return json(res, 200, { ok: true });
     }
 
@@ -414,6 +434,7 @@ async function handler(req, res) {
       if (to === user) return json(res, 400, { error: "You cannot send files to yourself" });
       const ex = await q("select 1 from users where name=$1", [to]);
       if (!ex.rows.length) return json(res, 404, { error: "No user called " + to });
+      if ((await q("select 1 from blocks where (name=$1 and other=$2) or (name=$2 and other=$1)", [user, to])).rows.length) return json(res, 403, { error: "You can't send to this person" });
       const used = await q("select coalesce(sum(size),0)::bigint as n from files where owner=$1", [user]);
       if (Number(used.rows[0].n) + buf.length > MAX_USER_STORE) return json(res, 400, { error: "You have reached the file limit for this account" });
       const f = await q("insert into files(owner,to_user,name,mime,size,data) values($1,$2,$3,$4,$5,$6) returning id", [user, to, fname, mime, buf.length, buf]);
@@ -443,10 +464,12 @@ const server = http.createServer((req, res) => {
 
 // ---------- Online / last seen ----------
 async function getPresence(n) {
+  const r = await q("select last_seen, hide_seen from users where name=$1", [n]);
+  const x = r.rows[0] || {};
+  if (x.hide_seen) return { type: "presence", name: n, online: false, last: null };
   const u = online.get(n);
   if (u && u.ws.readyState === 1) return { type: "presence", name: n, online: true, last: null };
-  const r = await q("select last_seen from users where name=$1", [n]);
-  return { type: "presence", name: n, online: false, last: r.rows[0] && r.rows[0].last_seen ? r.rows[0].last_seen : null };
+  return { type: "presence", name: n, online: false, last: x.last_seen || null };
 }
 // Tell everyone who has this person's chat open that they just came online or went offline.
 async function announce(n) {
@@ -495,20 +518,28 @@ wss.on("connection", (ws) => {
         un.rows.forEach((x) => { unread[x.other] = x.n; });
         const names = new Set([name, "shop"]);
         h.rows.forEach((x) => names.add(x.from === name ? x.to : x.from));
-        const pr = await q("select name, avatar_v, phone, show_phone from users where name = any($1)", [[...names]]);
+        const pr = await q("select name, avatar_v, phone, about from users where name = any($1)", [[...names]]);
         const profiles = {};
-        pr.rows.forEach((x) => { profiles[x.name] = { av: x.avatar_v, phone: x.phone }; });
+        pr.rows.forEach((x) => { profiles[x.name] = { av: x.avatar_v, phone: x.phone, about: x.about }; });
         const msgs = h.rows.reverse().map((x) => ({
           id: Number(x.id), from: x.from, to: x.to, text: x.deleted_at ? "" : x.text, kind: x.kind, at: x.at, edited: !!x.edited_at, deleted: !!x.deleted_at, reply: x.reply_to ? Number(x.reply_to) : null,
           st: x.read_at ? "read" : x.delivered_at ? "delivered" : "sent",
           file: x.fid && !x.deleted_at ? { id: Number(x.fid), name: x.fname, mime: x.fmime, size: x.fsize } : null,
         }));
-        return send({ type: "history", msgs, unread, profiles });
+        const pf = {};
+        (await q("select other, pinned, archived, muted from prefs where name=$1", [name])).rows.forEach((x) => { pf[x.other] = { p: x.pinned, a: x.archived, m: x.muted }; });
+        const blocked = (await q("select other from blocks where name=$1", [name])).rows.map((x) => x.other);
+        return send({ type: "history", msgs, unread, profiles, prefs: pf, blocked });
       }
       if (!name) return fail("Join first");
 
       if (m.type === "read") {
         const other = String(m.with || "").toLowerCase();
+        const nrc = await q("select no_receipts from users where name=$1", [name]);
+        if (nrc.rows[0] && nrc.rows[0].no_receipts) {
+          await q("insert into reads(name,other,last_id) select $1,$2,coalesce(max(id),0) from messages where to_user=$1 and from_user=$2 on conflict (name,other) do update set last_id = excluded.last_id", [name, other]);
+          return;
+        }
         const r = await q("update messages set read_at=now(), delivered_at=coalesce(delivered_at, now()) where to_user=$1 and from_user=$2 and read_at is null returning id", [name, other]);
         await q("insert into reads(name,other,last_id) select $1,$2,coalesce(max(id),0) from messages where to_user=$1 and from_user=$2 on conflict (name,other) do update set last_id = excluded.last_id", [name, other]);
         const u = online.get(other);
@@ -525,9 +556,25 @@ wss.on("connection", (ws) => {
         if (to === name) return fail("You cannot message yourself");
         const ex = await q("select 1 from users where name=$1", [to]);
         if (!ex.rows.length) return fail("No user called " + to);
+        if ((await q("select 1 from blocks where (name=$1 and other=$2) or (name=$2 and other=$1)", [name, to])).rows.length) return fail("You can't message this person");
         const reply = parseInt(m.reply) || null;
         const d = await deliver(name, to, text, "msg", null, null, reply);
         return send({ type: "sent", cid: m.cid, id: d.id, to, text, kind: "msg", file: null, reply, at: d.at, st: d.st });
+      }
+
+      if (m.type === "pref") {
+        const col = { p: "pinned", a: "archived", m: "muted" }[m.key];
+        if (!col) return;
+        await q("insert into prefs(name,other," + col + ") values($1,$2,$3) on conflict (name,other) do update set " + col + "=excluded." + col, [name, String(m.with || "").toLowerCase(), !!m.on]);
+        return;
+      }
+
+      if (m.type === "block") {
+        const o = String(m.with || "").toLowerCase();
+        if (!o || o === "shop" || o === name) return;
+        if (m.on) await q("insert into blocks(name,other) values($1,$2) on conflict do nothing", [name, o]);
+        else await q("delete from blocks where name=$1 and other=$2", [name, o]);
+        return;
       }
 
       if (m.type === "presence") {
