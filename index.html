@@ -62,6 +62,8 @@ input[type=checkbox]{width:auto}
 #modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;z-index:20;padding:12px}
 .sheet{background:var(--panel);border-radius:16px;padding:18px;width:min(94vw,380px);max-height:92vh;overflow:auto;display:flex;flex-direction:column;gap:10px}
 .sheet label.note{display:flex;flex-direction:column;gap:4px}.sheet label.note.chk{flex-direction:row;align-items:center;gap:8px}
+.act{display:block;width:100%;text-align:left;padding:13px 4px;border-bottom:1px solid var(--line);font-size:16px}
+.act.dng{color:var(--red)}.dl{color:var(--mute);font-style:italic}.m{cursor:pointer}
 .lbl{display:inline-block;cursor:pointer;text-align:center}
 .cen{display:flex;gap:10px;justify-content:center;align-items:center}
 #lb{position:fixed;inset:0;background:#000;display:grid;place-items:center;z-index:30;cursor:zoom-out}
@@ -83,17 +85,17 @@ input[type=checkbox]{width:auto}
   </div>
 
   <div class="pane" id="p_signup" hidden>
-    <p class="note">Your name is how friends find you. Add a phone number or email so you can reset a forgotten password.</p>
+    <p class="note">Your name and phone number are how friends find you, and friends can see your number. We also use your phone to send a code if you forget your password.</p>
     <input id="s_name" placeholder="Your name (3 to 20 letters or numbers)" maxlength="20" aria-label="Your name" autocomplete="username" autocapitalize="none">
-    <input id="s_phone" type="tel" placeholder="Phone number (optional)" aria-label="Phone number" autocomplete="tel">
-    <input id="s_email" type="email" placeholder="Email (optional)" aria-label="Email" autocomplete="email" autocapitalize="none">
+    <input id="s_phone" type="tel" placeholder="Phone number, e.g. 0712 345 678" aria-label="Phone number" autocomplete="tel">
+    <input id="s_email" type="email" placeholder="Email (optional, also gets reset codes)" aria-label="Email" autocomplete="email" autocapitalize="none">
     <input id="s_pw" type="password" placeholder="Password (6 or more characters)" aria-label="Password" autocomplete="new-password">
     <button class="pri" id="signup">Create account</button>
     <button class="lnk" id="back_login1">Back to log in</button>
   </div>
 
   <div class="pane" id="p_forgot" hidden>
-    <p class="note">Type your name, phone number or email. We will send you a 6-digit code.</p>
+    <p class="note">Type your name, phone number or email. We will send a 6-digit code by SMS, and by email too if you saved one.</p>
     <input id="f_id" placeholder="Name, phone number or email" aria-label="Name, phone number or email" autocapitalize="none">
     <button class="pri" id="forgot">Send code</button>
     <button class="lnk" id="have_code">I already have a code</button>
@@ -163,6 +165,7 @@ function avh(n,cls){
   return '<span class="av '+(cls||"")+'">'+l+'</span>';
 }
 function preview(m){
+  if(m.del)return "🚫 This message was deleted";
   if(m.kind==="file"&&m.file){
     if(/^image\//.test(m.file.mime))return "📷 Photo";
     if(/^video\//.test(m.file.mime))return "🎥 Video";
@@ -182,6 +185,7 @@ function doLogin(){
 function doSignup(){
   var n=$("s_name").value.trim(),p=$("s_pw").value;
   if(!n||!p){say("Type your name and a password");return}
+  if(!$("s_phone").value.trim()){say("Type your phone number");return}
   say("Please wait…");
   pj("/api/register",{name:n,password:p,phone:$("s_phone").value.trim(),email:$("s_email").value.trim()}).then(afterAuth).catch(function(){say("Could not reach the server. Try again.")});
 }
@@ -219,10 +223,11 @@ function connect(){
 function handle(d){
   var t=d.type;
   if(t==="auth"){token="";try{localStorage.removeItem("gz")}catch(e){}$("app").hidden=true;$("join").hidden=false;pane("login");say("Please log in again");return}
-  if(t==="joined"){me=d.name;$("join").hidden=true;$("app").hidden=false;status("Connected as "+me);renderList();renderMain();return}
+  if(t==="joined"){me=d.name;$("join").hidden=true;$("app").hidden=false;status("Connected as "+me);renderList();renderMain();
+    if(me!=="shop")api("/api/me").then(function(x){if(x&&!x.error&&!x.phone)openProfile("Please add your phone number. Friends use it to find you, and it is how you reset a forgotten password.")}).catch(function(){});return}
   if(t==="history"){
     chats={shop:{m:[],un:0}};prof=d.profiles||prof;
-    (d.msgs||[]).forEach(function(x){var o=x.from===me?x.to:x.from;chat(o).m.push({id:x.id,me:x.from===me?1:0,t:x.text,time:hm(x.at),st:x.st,kind:x.kind,file:x.file})});
+    (d.msgs||[]).forEach(function(x){var o=x.from===me?x.to:x.from;chat(o).m.push({id:x.id,me:x.from===me?1:0,t:x.text,time:hm(x.at),ts:new Date(x.at).getTime(),st:x.st,kind:x.kind,file:x.file,ed:x.edited,del:x.deleted})});
     Object.keys(d.unread||{}).forEach(function(k){chat(k).un=+d.unread[k]});
     if(cur){chat(cur).un=0;tx({type:"read",with:cur})}
     renderList();renderMain();return;
@@ -231,7 +236,7 @@ function handle(d){
   if(t==="catalog"){catalog=d.products;renderShop();return}
   if(t==="typing"){if(d.from===cur&&$("st")){$("st").textContent="typing…";setTimeout(function(){if($("st"))$("st").textContent=""},2000)}return}
   if(t==="msg"){
-    var c=chat(d.from);c.m.push({id:d.id,me:0,t:d.text,time:hm(d.at),kind:d.kind,file:d.file});
+    var c=chat(d.from);c.m.push({id:d.id,me:0,t:d.text,time:hm(d.at),ts:new Date(d.at).getTime(),kind:d.kind,file:d.file});
     if(!prof[d.from])loadProf(d.from);
     if(cur!==d.from)c.un++;else tx({type:"read",with:d.from});
     renderList();if(cur===d.from)renderMsgs();return;
@@ -239,9 +244,13 @@ function handle(d){
   if(t==="sent"){
     var cc=chat(d.to),pm=null;
     if(d.cid)cc.m.forEach(function(x){if(x.cid===d.cid)pm=x});
-    if(pm){pm.id=d.id;pm.st=d.st;pm.time=hm(d.at)}
-    else cc.m.push({id:d.id,me:1,t:d.text,time:hm(d.at),st:d.st,kind:d.kind,file:d.file});
+    if(pm){pm.id=d.id;pm.st=d.st;pm.time=hm(d.at);pm.ts=new Date(d.at).getTime()}
+    else cc.m.push({id:d.id,me:1,t:d.text,time:hm(d.at),ts:new Date(d.at).getTime(),st:d.st,kind:d.kind,file:d.file});
     renderList();if(cur===d.to)renderMsgs();return;
+  }
+  if(t==="edited"||t==="deleted"){
+    chat(d.with).m.forEach(function(m){if(m.id===d.id){if(t==="edited"){m.t=d.text;m.ed=1}else{m.del=1;m.t="";m.file=null}}});
+    renderList();if(cur===d.with)renderMsgs();return;
   }
   if(t==="receipt"){
     var ids={};(d.ids||[]).forEach(function(i){ids[i]=1});
@@ -265,7 +274,7 @@ function renderList(){
 function renderMain(){
   if(!cur){$("main").innerHTML='<div class="empty">Pick a chat, or type a friend’s name or phone number and tap Chat.</div>';return}
   $("main").innerHTML='<div class="hdr"><button class="back" id="back" aria-label="Back to chats">‹</button><button class="who" id="who">'+avh(cur)+'<span class="grow"><strong>'+esc(label(cur))+'</strong><small id="st"></small></span></button>'+
-  (cur==="shop"?'<button class="light" id="browse">Browse products</button>':'')+'</div>'+
+  (cur==="shop"?'<button class="light" id="browse">Browse products</button>':'')+'<button class="light" id="chatmenu" aria-label="Chat options">⋮</button></div>'+
   '<div class="msgs" id="msgs"></div><div class="shop" id="shop" hidden></div>'+
   '<div class="bar"><button class="clip" id="clip" aria-label="Send a photo, video or file">📎</button><input id="in" placeholder="Write a message" aria-label="Write a message" autocomplete="off"><button class="pri" id="send">Send</button></div>';
   renderMsgs();
@@ -287,7 +296,7 @@ function fileHtml(m,i){
 function renderMsgs(){
   if(!cur||!$("msgs"))return;
   var h="";chats[cur].m.forEach(function(m,i){
-    h+='<div class="m'+(m.me?' me':'')+'">'+(m.file?fileHtml(m,i):'')+(m.t?'<div>'+esc(m.t)+'</div>':'')+'<time>'+m.time+(m.me?' '+tk(m.st):'')+'</time></div>';
+    h+='<div class="m'+(m.me?' me':'')+'" data-mi="'+i+'">'+(m.del?'<div class="dl">🚫 This message was deleted</div>':(m.file?fileHtml(m,i):'')+(m.t?'<div>'+esc(m.t)+'</div>':''))+'<time>'+(m.ed&&!m.del?'edited · ':'')+m.time+(m.me&&!m.del?' '+tk(m.st):'')+'</time></div>';
   });
   var el=$("msgs");el.innerHTML=h||'<div class="empty">No messages yet. Say hi 👋</div>';el.scrollTop=el.scrollHeight;
 }
@@ -354,23 +363,22 @@ function sendFile(f){
 function modal(h){$("modal").innerHTML=h;$("modal").hidden=false}
 function closeModal(){$("modal").hidden=true;$("modal").innerHTML=""}
 function pmsg(t){if($("p_msg"))$("p_msg").textContent=t}
-function openProfile(){
+function openProfile(first){
   modal('<div class="sheet"><p class="note">Loading…</p></div>');
   api("/api/me").then(function(d){
     if(d.error){closeModal();return}
     prof[me]=prof[me]||{};prof[me].av=d.av;renderList();
     modal('<div class="sheet">'+avh(me,"big")+'<strong style="text-align:center;font-size:18px">'+esc(me)+'</strong>'+
     '<div class="cen"><label class="pri lbl">Change photo<input type="file" id="avin" accept="image/*" hidden></label>'+(d.av?'<button class="lnk" id="avrm">Remove</button>':'')+'</div>'+
-    '<label class="note">Phone number<input id="p_phone" type="tel" placeholder="e.g. 0712 345 678" autocomplete="tel"></label>'+
-    '<label class="note chk"><input type="checkbox" id="p_show"> Let other people see my phone number and find me with it</label>'+
+    '<label class="note">Phone number (needed, friends can see it and find you with it)<input id="p_phone" type="tel" placeholder="e.g. 0712 345 678" autocomplete="tel"></label>'+
     '<label class="note">Email (used to reset your password)<input id="p_email" type="email" autocapitalize="none" autocomplete="email"></label>'+
     '<p class="note" id="p_msg"></p><button class="pri" id="p_save">Save</button><button class="lnk" id="p_close">Close</button></div>');
-    $("p_phone").value=d.phone||"";$("p_email").value=d.email||"";$("p_show").checked=!!d.show_phone;
+    $("p_phone").value=d.phone||"";$("p_email").value=d.email||"";if(first)pmsg(first);
   }).catch(function(){closeModal();status("Could not open your profile")});
 }
 function saveProfile(){
   pmsg("Saving…");
-  post("/api/profile",{phone:$("p_phone").value.trim(),email:$("p_email").value.trim(),show_phone:$("p_show").checked}).then(function(d){
+  post("/api/profile",{phone:$("p_phone").value.trim(),email:$("p_email").value.trim()}).then(function(d){
     if(d.error){pmsg(d.error);return}
     $("p_phone").value=d.phone||"";$("p_email").value=d.email||"";pmsg("Saved ✓");
   }).catch(function(){pmsg("Could not save. Try again.")});
@@ -384,9 +392,18 @@ function setAvatar(f){
     prof[me]=prof[me]||{};prof[me].av=d.av;renderList();openProfile();
   }).catch(function(){pmsg("That photo could not be used. Try another.")});
 }
+var selMsg=-1;
+function msgMenu(i){
+  var m=chats[cur].m[i];if(!m||!m.id)return;selMsg=i;
+  var h='<div class="sheet"><strong>Message</strong>';
+  if(!m.del&&m.me&&m.kind==="msg"&&!m.file&&Date.now()-m.ts<120000)h+='<button class="act" id="act_edit">✏️ Edit (up to 2 minutes after sending)</button>';
+  h+='<button class="act" id="act_me">Delete for me only</button>';
+  if(m.me&&!m.del&&m.kind!=="order")h+='<button class="act dng" id="act_all">Delete for everyone</button>';
+  modal(h+'<button class="lnk" id="p_close">Cancel</button></div>');
+}
 function openCard(n){
   var p=prof[n]||{};
-  modal('<div class="sheet">'+avh(n,"big")+'<strong style="text-align:center;font-size:18px">'+esc(label(n))+'</strong><p class="note" style="text-align:center">'+(p.phone?'Phone: '+esc(p.phone):'Phone number hidden or not added')+'</p><button class="lnk" id="p_close">Close</button></div>');
+  modal('<div class="sheet">'+avh(n,"big")+'<strong style="text-align:center;font-size:18px">'+esc(label(n))+'</strong><p class="note" style="text-align:center">'+(p.phone?'Phone: '+esc(p.phone):'No phone number added')+'</p><button class="lnk" id="p_close">Close</button></div>');
 }
 
 /* ---------- events ---------- */
@@ -395,8 +412,27 @@ document.addEventListener("click",function(e){
   var o=e.target.closest("[data-open]");
   if(o){$("lb").innerHTML='<img src="'+esc(o.dataset.open)+'" alt="">';$("lb").hidden=false;return}
   if(e.target.id==="modal"){closeModal();return}
+  var bub=e.target.closest(".m");
+  if(bub&&!e.target.closest("a,video,button")){return msgMenu(+bub.dataset.mi)}
   var t=e.target.closest("button");if(!t)return;
+  var sm=chats[cur]&&chats[cur].m[selMsg];
   switch(t.id){
+    case"act_me":if(sm){tx({type:"delete",id:sm.id,scope:"me"});chats[cur].m.splice(selMsg,1)}closeModal();renderList();renderMsgs();return;
+    case"act_all":if(sm)tx({type:"delete",id:sm.id,scope:"all"});closeModal();return;
+    case"act_edit":
+      if(!sm)return;
+      modal('<div class="sheet"><strong>Edit message</strong><input id="ed_in" maxlength="2000" autocomplete="off"><button class="pri" id="ed_save">Save</button><button class="lnk" id="p_close">Cancel</button></div>');
+      $("ed_in").value=sm.t;$("ed_in").focus();return;
+    case"ed_save":
+      var nt=$("ed_in").value.trim();
+      if(sm&&nt&&nt!==sm.t)tx({type:"edit",id:sm.id,text:nt});
+      closeModal();return;
+    case"chatmenu":
+      modal('<div class="sheet"><strong>'+esc(label(cur))+'</strong><button class="act dng" id="del_chat">Delete this chat for me only</button><p class="note">The other person keeps their copy. Messages you delete here stay on their phone.</p><button class="lnk" id="p_close">Cancel</button></div>');return;
+    case"del_chat":
+      tx({type:"clear",with:cur});
+      if(cur==="shop")chats.shop.m=[];else delete chats[cur];
+      cur=null;closeModal();$("app").classList.remove("open");renderList();renderMain();return;
     case"login":return doLogin();
     case"signup":return doSignup();
     case"go_signup":return pane("signup");
@@ -443,6 +479,7 @@ document.addEventListener("keydown",function(e){
   if(e.key!=="Enter")return;
   var id=e.target.id;
   if(id==="in")send();
+  else if(id==="ed_in")$("ed_save").click();
   else if(id==="l_pw"||id==="l_id")doLogin();
   else if(id==="s_pw")doSignup();
   else if(id==="f_id")doForgot();

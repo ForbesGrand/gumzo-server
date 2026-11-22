@@ -112,7 +112,7 @@ async function sendSms(to, text) {
     const r = await fetch(base + "/version1/messaging", {
       method: "POST",
       headers: { apiKey: process.env.AT_API_KEY, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ username: process.env.AT_USERNAME, to, message: text }).toString(),
+      body: new URLSearchParams(Object.assign({ username: process.env.AT_USERNAME, to, message: text }, process.env.AT_SENDER ? { from: process.env.AT_SENDER } : {})).toString(),
     });
     if (!r.ok) { console.error("SMS failed:", r.status, await r.text()); return false; }
     return true;
@@ -142,6 +142,11 @@ async function setup() {
   await q("alter table messages add column if not exists delivered_at timestamptz");
   await q("alter table messages add column if not exists read_at timestamptz");
   if (!had.rows.length) await q("update messages set delivered_at=created, read_at=created"); // old messages count as read
+  await q("alter table messages add column if not exists deleted_at timestamptz");
+  await q("alter table messages add column if not exists edited_at timestamptz");
+  await q("create table if not exists hidden(name text not null, msg_id bigint not null, primary key(name, msg_id))");
+  await q("create table if not exists cleared(name text not null, other text not null, up_to bigint not null, primary key(name, other))");
+  await q("update users set show_phone=true where show_phone=false"); // phone numbers are always findable
   await q("create table if not exists files(id bigserial primary key, owner text not null, to_user text not null, name text not null, mime text not null, size int not null, data bytea not null, created timestamptz default now())");
   await q("create table if not exists resets(name text primary key, code_hash text not null, expires timestamptz not null, tries int not null default 0)");
 
@@ -236,10 +241,11 @@ async function handler(req, res) {
         if (name === "shop") return json(res, 400, { error: "That name is reserved" });
         if (pw.length < 6) return json(res, 400, { error: "Password needs at least 6 characters" });
         let phone = null, email = null;
-        if (String(b.phone || "").trim()) { phone = normPhone(b.phone); if (!phone) return json(res, 400, { error: "That phone number doesn't look right" }); }
+        phone = normPhone(b.phone);
+        if (!phone) return json(res, 400, { error: "Type your phone number, for example 0712 345 678" });
         if (String(b.email || "").trim()) { email = String(b.email).trim().toLowerCase(); if (!goodEmail(email)) return json(res, 400, { error: "That email doesn't look right" }); }
         try {
-          const r = await q("insert into users(name,hash,phone,email) values($1,$2,$3,$4) on conflict (name) do nothing returning name", [name, hash(pw), phone, email]);
+          const r = await q("insert into users(name,hash,phone,email,show_phone) values($1,$2,$3,$4,$5) on conflict (name) do nothing returning name", [name, hash(pw), phone, email, true]);
           if (!r.rows.length) return json(res, 409, { error: "That name is taken. Try another." });
         } catch (e) {
           if (e.code === "23505") return json(res, 409, { error: /phone/.test(e.constraint || "") ? "That phone number is already used by another account" : "That email is already used by another account" });
@@ -283,9 +289,11 @@ async function handler(req, res) {
         const ch = crypto.createHash("sha256").update(u.name + ":" + code).digest("hex");
         await q("insert into resets(name,code_hash,expires,tries) values($1,$2,now()+interval '15 minutes',0) on conflict (name) do update set code_hash=excluded.code_hash, expires=excluded.expires, tries=0", [u.name, ch]);
         const msg = "Your Gumzo code is " + code + ". It works for 15 minutes. If you did not ask for it, ignore this message.";
-        let sent = false;
-        if (u.email) sent = await sendEmail(u.email, "Your Gumzo password code", msg);
-        if (!sent && u.phone) sent = await sendSms(u.phone, msg);
+        const results = await Promise.all([
+          u.phone ? sendSms(u.phone, msg) : false,
+          u.email ? sendEmail(u.email, "Your Gumzo password code", msg) : false,
+        ]);
+        const sent = results.some(Boolean);
         if (!sent) console.error("Reset code for " + u.name + " could not be sent (no email/SMS set up or sending failed).");
       }
       return json(res, 200, same);
@@ -334,32 +342,31 @@ async function handler(req, res) {
 
     if (p === "/api/find") {
       const s = String(url.searchParams.get("q") || "").trim().toLowerCase();
-      const r = await q("select name, avatar_v, phone, show_phone from users where name=$1 or (show_phone and phone=$2) order by (name=$1) desc limit 1", [s, normPhone(s)]);
+      const r = await q("select name, avatar_v, phone, show_phone from users where name=$1 or phone=$2 order by (name=$1) desc limit 1", [s, normPhone(s)]);
       if (!r.rows.length) return json(res, 200, { found: false });
       const x = r.rows[0];
-      return json(res, 200, { found: true, name: x.name, av: x.avatar_v, phone: x.show_phone ? x.phone : null });
+      return json(res, 200, { found: true, name: x.name, av: x.avatar_v, phone: x.phone });
     }
 
     if (p === "/api/user") {
       const r = await q("select name, avatar_v, phone, show_phone from users where name=$1", [String(url.searchParams.get("name") || "").toLowerCase()]);
       if (!r.rows.length) return json(res, 404, { error: "No such user" });
       const x = r.rows[0];
-      return json(res, 200, { name: x.name, av: x.avatar_v, phone: x.show_phone ? x.phone : null });
+      return json(res, 200, { name: x.name, av: x.avatar_v, phone: x.phone });
     }
 
     if (req.method === "POST" && p === "/api/profile") {
       const b = await readBody(req);
       const cur = (await q("select phone, email, show_phone from users where name=$1", [user])).rows[0];
-      let phone = cur.phone, email = cur.email, show = cur.show_phone;
+      let phone = cur.phone, email = cur.email, show = true;
       if ("phone" in b) {
         const s = String(b.phone || "").trim();
-        if (!s) phone = null; else { phone = normPhone(s); if (!phone) return json(res, 400, { error: "That phone number doesn't look right" }); }
+        if (!s) { if (user !== "shop") return json(res, 400, { error: "A phone number is needed on every account" }); phone = null; } else { phone = normPhone(s); if (!phone) return json(res, 400, { error: "That phone number doesn't look right" }); }
       }
       if ("email" in b) {
         const s = String(b.email || "").trim().toLowerCase();
         if (!s) email = null; else { if (!goodEmail(s)) return json(res, 400, { error: "That email doesn't look right" }); email = s; }
       }
-      if ("show_phone" in b) show = !!b.show_phone;
       try {
         if (b.removeAvatar) await q("update users set avatar=null, avatar_mime=null, avatar_v=avatar_v+1 where name=$1", [user]);
         await q("update users set phone=$1, email=$2, show_phone=$3 where name=$4", [phone, email, show, user]);
@@ -452,20 +459,23 @@ wss.on("connection", (ws) => {
         }
 
         const h = await q(
-          'select m.id, m.from_user as "from", m.to_user as "to", m.text, m.kind, m.created as at, m.delivered_at, m.read_at, f.id as fid, f.name as fname, f.mime as fmime, f.size as fsize ' +
-          "from messages m left join files f on f.id=m.file_id where m.from_user=$1 or m.to_user=$1 order by m.id desc limit 300", [name]);
-        const un = await q("select m.from_user as other, count(*)::int as n from messages m left join reads r on r.name=$1 and r.other=m.from_user where m.to_user=$1 and m.id > coalesce(r.last_id,0) group by m.from_user", [name]);
+          'select m.id, m.from_user as "from", m.to_user as "to", m.text, m.kind, m.created as at, m.delivered_at, m.read_at, m.deleted_at, m.edited_at, f.id as fid, f.name as fname, f.mime as fmime, f.size as fsize ' +
+          "from messages m left join files f on f.id=m.file_id where (m.from_user=$1 or m.to_user=$1) " +
+          "and not exists (select 1 from hidden hd where hd.name=$1 and hd.msg_id=m.id) " +
+          "and m.id > coalesce((select c.up_to from cleared c where c.name=$1 and c.other = case when m.from_user=$1 then m.to_user else m.from_user end), 0) " +
+          "order by m.id desc limit 300", [name]);
+        const un = await q("select m.from_user as other, count(*)::int as n from messages m left join reads r on r.name=$1 and r.other=m.from_user where m.to_user=$1 and m.deleted_at is null and not exists (select 1 from hidden hd where hd.name=$1 and hd.msg_id=m.id) and m.id > coalesce(r.last_id,0) group by m.from_user", [name]);
         const unread = {};
         un.rows.forEach((x) => { unread[x.other] = x.n; });
         const names = new Set([name, "shop"]);
         h.rows.forEach((x) => names.add(x.from === name ? x.to : x.from));
         const pr = await q("select name, avatar_v, phone, show_phone from users where name = any($1)", [[...names]]);
         const profiles = {};
-        pr.rows.forEach((x) => { profiles[x.name] = { av: x.avatar_v, phone: x.show_phone || x.name === name ? x.phone : null }; });
+        pr.rows.forEach((x) => { profiles[x.name] = { av: x.avatar_v, phone: x.phone }; });
         const msgs = h.rows.reverse().map((x) => ({
-          id: Number(x.id), from: x.from, to: x.to, text: x.text, kind: x.kind, at: x.at,
+          id: Number(x.id), from: x.from, to: x.to, text: x.deleted_at ? "" : x.text, kind: x.kind, at: x.at, edited: !!x.edited_at, deleted: !!x.deleted_at,
           st: x.read_at ? "read" : x.delivered_at ? "delivered" : "sent",
-          file: x.fid ? { id: Number(x.fid), name: x.fname, mime: x.fmime, size: x.fsize } : null,
+          file: x.fid && !x.deleted_at ? { id: Number(x.fid), name: x.fname, mime: x.fmime, size: x.fsize } : null,
         }));
         return send({ type: "history", msgs, unread, profiles });
       }
@@ -491,6 +501,43 @@ wss.on("connection", (ws) => {
         if (!ex.rows.length) return fail("No user called " + to);
         const d = await deliver(name, to, text, "msg", null, null);
         return send({ type: "sent", cid: m.cid, id: d.id, to, text, kind: "msg", file: null, at: d.at, st: d.st });
+      }
+
+      if (m.type === "edit") {
+        const id = parseInt(m.id);
+        const text = String(m.text || "").trim().slice(0, 2000);
+        if (!text) return fail("A message cannot be empty");
+        const r = await q("update messages set text=$1, edited_at=now() where id=$2 and from_user=$3 and kind='msg' and file_id is null and deleted_at is null and created > now() - interval '2 minutes' returning to_user", [text, id, name]);
+        if (!r.rows.length) return fail("You can only edit your own text messages, within 2 minutes of sending");
+        const to = r.rows[0].to_user;
+        send({ type: "edited", id, text, with: to });
+        const u = online.get(to);
+        if (u && u.ws.readyState === 1) u.ws.send(JSON.stringify({ type: "edited", id, text, with: name }));
+        return;
+      }
+
+      if (m.type === "delete") {
+        const id = parseInt(m.id);
+        if (m.scope === "all") {
+          const old = await q("select to_user, file_id from messages where id=$1 and from_user=$2 and kind<>'order' and deleted_at is null", [id, name]);
+          if (!old.rows.length) return fail("You can only delete your own messages for everyone");
+          await q("update messages set deleted_at=now(), text='', file_id=null where id=$1", [id]);
+          if (old.rows[0].file_id) await q("delete from files where id=$1", [old.rows[0].file_id]);
+          const to = old.rows[0].to_user;
+          send({ type: "deleted", id, with: to });
+          const u = online.get(to);
+          if (u && u.ws.readyState === 1) u.ws.send(JSON.stringify({ type: "deleted", id, with: name }));
+        } else {
+          await q("insert into hidden(name,msg_id) select $1, id from messages where id=$2 and (from_user=$1 or to_user=$1) on conflict do nothing", [name, id]);
+        }
+        return;
+      }
+
+      if (m.type === "clear") {
+        const other = String(m.with || "").toLowerCase();
+        await q("insert into cleared(name,other,up_to) select $1,$2,coalesce(max(id),0) from messages where (from_user=$1 and to_user=$2) or (from_user=$2 and to_user=$1) on conflict (name,other) do update set up_to = excluded.up_to", [name, other]);
+        await q("insert into reads(name,other,last_id) select $1,$2,coalesce(max(id),0) from messages where to_user=$1 and from_user=$2 on conflict (name,other) do update set last_id = excluded.last_id", [name, other]);
+        return;
       }
 
       if (m.type === "typing") {
