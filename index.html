@@ -112,6 +112,7 @@ html[data-theme=yellow] .hdr{background:linear-gradient(125deg,var(--red),color-
 #join h1{font-size:44px;letter-spacing:-1.5px;background:linear-gradient(120deg,var(--red),color-mix(in srgb,var(--red) 60%,#000));-webkit-background-clip:text;background-clip:text;color:transparent}
 .pri{box-shadow:0 3px 10px color-mix(in srgb,var(--red) 35%,transparent)}
 .badge{padding:2px 8px;box-shadow:0 2px 6px color-mix(in srgb,var(--red) 40%,transparent)}
+.pinbar{padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--line);font-size:13px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 </style>
 </head>
 <body>
@@ -307,7 +308,7 @@ function handle(d){
     api("/api/me").then(function(x){if(!x||x.error)return;applyLook(x.theme,x.bg);if(me!=="shop"&&!x.phone)openProfile("Please add your phone number. Friends use it to find you, and it is how you reset a forgotten password.")}).catch(function(){});return}
   if(t==="history"){
     chats={shop:{m:[],un:0}};prof=d.profiles||prof;dis=d.dis||{};starred={};(d.stars||[]).forEach(function(i){starred[i]=1});prefs=d.prefs||{};groups=d.groups||{};Object.keys(groups).forEach(function(k){chat(k)});blocked={};(d.blocked||[]).forEach(function(b){blocked[b]=1});
-    (d.msgs||[]).forEach(function(x){var o=isG(x.to)?x.to:x.from===me?x.to:x.from;chat(o).m.push({exp:x.exp,rx:x.rx||{},from:x.from,id:x.id,me:x.from===me?1:0,t:x.text,time:hm(x.at),ts:new Date(x.at).getTime(),st:x.st,kind:x.kind,file:x.file,ed:x.edited,del:x.deleted,rep:x.reply})});
+    (d.msgs||[]).forEach(function(x){var o=isG(x.to)?x.to:x.from===me?x.to:x.from;chat(o).m.push({exp:x.exp,rx:x.rx||{},from:x.from,id:x.id,me:x.from===me?1:0,t:x.text,time:hm(x.at),ts:new Date(x.at).getTime(),st:x.st,kind:x.kind,file:x.file,ed:x.edited,del:x.deleted,rep:x.reply,pn:x.pn})});
     Object.keys(d.unread||{}).forEach(function(k){chat(k).un=+d.unread[k]});
     if(cur){chat(cur).un=0;tx({type:"read",with:cur});if(!isG(cur))tx({type:"presence",with:cur})}
     renderList();renderMain();return;
@@ -316,6 +317,7 @@ function handle(d){
   if(t==="catalog"){catalog=d.products;renderShop();return}
   if(t==="typing"){if(d.from===cur&&$("st")){typingUntil=Date.now()+2000;$("st").textContent="typing…";setTimeout(showPres,2100)}return}
   if(t==="dset"){dis[d.with]=d.secs;if(cur===d.with&&$("hn"))$("hn").textContent=label(cur)+(d.secs?" ⏳":"");status(d.secs?"Disappearing messages are on":"Disappearing messages are off");return}
+  if(t==="pin"){chat(d.with).m.forEach(function(m){m.pn=(m.id===d.id)?!!d.on:false});if(cur===d.with)pinBar();return}
   if(t==="react"){
     chat(d.with).m.forEach(function(m){if(m.id===d.id){m.rx=m.rx||{};if(d.emoji)m.rx[d.name]=d.emoji;else delete m.rx[d.name]}});
     if(cur===d.with)renderMsgs();return;
@@ -367,7 +369,7 @@ function renderMain(){
   if(!cur){$("main").innerHTML='<div class="empty">Pick a chat, or type a friend’s name or phone number and tap Chat.</div>';return}
   $("main").innerHTML='<div class="hdr"><button class="back" id="back" aria-label="Back to chats">‹</button><button class="who" id="who">'+avh(cur)+'<span class="grow"><strong id="hn">'+esc(label(cur))+(dis[cur]?' ⏳':'')+'</strong><small id="st"></small></span></button>'+
   (cur==="shop"?'<button class="light" id="browse">Browse products</button>':'')+'<button class="light" id="chatmenu" aria-label="Chat options">⋮</button></div>'+
-  '<div class="msgs" id="msgs"></div><div class="shop" id="shop" hidden></div>'+
+  '<div class="pinbar" id="pinbar" hidden></div><div class="msgs" id="msgs"></div><div class="shop" id="shop" hidden></div>'+
   '<div class="rb" id="rb" hidden></div><div id="emo" hidden>'+EMO.map(function(e){return '<button data-emo="'+e+'">'+e+'</button>'}).join("")+'</div><div class="bar"><button class="clip" id="clip" aria-label="Send a photo, video or file">📎</button><button class="clip" id="emob" aria-label="Emoji">😊</button><button class="clip" id="mic" aria-label="Record a voice note">🎤</button><input id="in" placeholder="Write a message" aria-label="Write a message" autocomplete="off"><button class="pri" id="send">Send</button></div>';
   renderMsgs();showPres();showReply();
 }
@@ -422,7 +424,8 @@ function sendLoc(){
     chat(cur).m.push({cid:cid,me:1,t:v,time:now(),st:"pending",kind:"msg"});tx({type:"msg",to:cur,text:v,cid:cid});renderMsgs();renderList();
   },function(){status("Allow location access to share it")});
 }
-function renderMsgs(){
+function pinBar(){var b=$("pinbar");if(!b||!cur)return;var pm=chat(cur).m.filter(function(m){return m.pn&&!m.del})[0];if(!pm){b.hidden=true;return}b.hidden=false;b.innerHTML="📌 "+esc((pm.t||(pm.file?"Attachment":"Message")).slice(0,80))}
+function renderMsgs(){pinBar();
   if(!cur||!$("msgs"))return;
   var h="";chats[cur].m.forEach(function(m,i){
     h+='<div class="m'+(m.me?' me':'')+'" data-mi="'+i+'">'+(isG(cur)&&!m.me&&!m.del?'<div class="sn">'+esc(m.from||"")+'</div>':'')+(m.del?'<div class="dl">🚫 This message was deleted</div>':qhtml(m)+(m.file?fileHtml(m,i):'')+(m.t?'<div>'+esc(m.t).replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>')+'</div>':''))+rxhtml(m)+'<time>'+(starred[m.id]?'⭐ ':'')+(m.ed&&!m.del?'edited · ':'')+m.time+(m.me&&!m.del?' '+tk(m.st):'')+'</time></div>';
@@ -535,7 +538,7 @@ function msgMenu(i){
   var h='<div class="sheet"><strong>Message</strong>';
   if(!m.del){
     h+='<div class="cen">'+["👍","❤️","😂","😮","😢","🙏"].map(function(e){return '<button style="font-size:26px" data-react="'+e+'">'+e+'</button>'}).join("")+'</div>';
-    h+='<button class="act" id="act_star">⭐ '+(starred[m.id]?"Unstar":"Star")+' message</button><button class="act" id="act_fwd">↪️ Forward</button>';
+    h+='<button class="act" id="act_star">⭐ '+(starred[m.id]?"Unstar":"Star")+' message</button><button class="act" id="act_pin">📌 '+(m.pn?"Unpin":"Pin")+' message</button><button class="act" id="act_fwd">↪️ Forward</button>';
   }
   if(!m.del&&m.me&&m.kind==="msg"&&!m.file&&Date.now()-m.ts<120000)h+='<button class="act" id="act_edit">✏️ Edit (up to 2 minutes after sending)</button>';
   if(!m.del)h+='<button class="act" id="act_reply">↩️ Reply</button>';
@@ -620,6 +623,7 @@ document.addEventListener("click",function(e){
   if(t.dataset.fwd){if(sm){tx({type:"forward",id:sm.id,to:t.dataset.fwd});status("Forwarding…")}closeModal();return}
   switch(t.id){
     case"act_me":if(sm){tx({type:"delete",id:sm.id,scope:"me"});chats[cur].m.splice(selMsg,1)}closeModal();renderList();renderMsgs();return;
+    case"act_pin":if(sm){tx({type:"pin",id:sm.id,on:!sm.pn})}closeModal();return;
     case"act_star":if(sm){starred[sm.id]=!starred[sm.id];tx({type:"star",id:sm.id,on:!!starred[sm.id]});renderMsgs()}closeModal();return;
     case"act_fwd":modal('<div class="sheet"><strong>Forward to…</strong>'+Object.keys(chats).map(function(n){return '<button class="act" data-fwd="'+esc(n)+'">'+esc(label(n))+'</button>'}).join("")+'<button class="lnk" id="p_close">Cancel</button></div>');return;
     case"starl":
@@ -633,6 +637,7 @@ document.addEventListener("click",function(e){
     case"pref_p":case"pref_a":case"pref_m":case"pref_u":
       var k=t.id.slice(5),o=prefs[cur]=prefs[cur]||{};o[k]=!o[k];tx({type:"pref",with:cur,key:k,on:!!o[k]});closeModal();
       if(k==="a"||k==="u"){cur=null;$("app").classList.remove("open");renderMain()}renderList();return;
+    case"rpt":{var why=prompt("Why are you reporting this? (spam, abuse, scam, other)");if(why&&why.trim()){tx({type:"report",who:cur,reason:why.trim()});status("Report sent. Thank you.")}closeModal();return}
     case"blk":blocked[cur]=!blocked[cur];tx({type:"block",with:cur,on:!!blocked[cur]});closeModal();status(blocked[cur]?"Blocked "+cur:"Unblocked "+cur);return;
     case"del_acc":
       var pw=prompt("Type your password to delete your account for good. This cannot be undone.");if(!pw)return;
@@ -650,7 +655,7 @@ document.addEventListener("click",function(e){
       if(sm&&nt&&nt!==sm.t)tx({type:"edit",id:sm.id,text:nt});
       closeModal();return;
     case"chatmenu":
-      modal('<div class="sheet"><strong>'+esc(label(cur))+'</strong><button class="act" id="pref_p">📌 '+(prefs[cur]&&prefs[cur].p?"Unpin":"Pin")+' chat</button><button class="act" id="pref_a">🗄️ '+(prefs[cur]&&prefs[cur].a?"Unarchive":"Archive")+' chat</button><button class="act" id="pref_m">🔇 '+(prefs[cur]&&prefs[cur].m?"Unmute":"Mute")+' chat</button>'+(isG(cur)?'<button class="act" id="g_info">👥 Group info and members</button>':'')+(cur==="shop"||isG(cur)?'':'<button class="act dng" id="blk">🚫 '+(blocked[cur]?"Unblock ":"Block ")+esc(cur)+'</button>')+'<button class="act" id="dis_m">⏳ Disappearing messages: '+({0:"Off",86400:"24 hours",604800:"7 days",7776000:"90 days"}[dis[cur]||0])+'</button>'+(isG(cur)?'':'<button class="act" id="once_m">👁 Send a view-once photo</button>')+'<button class="act" id="pref_u">'+(prefs[cur]&&prefs[cur].u?"✔️ Clear unread mark":"🔵 Mark as unread")+'</button><button class="act" id="loc_send">📍 Send my location</button><button class="act" id="exp_chat">⬇️ Export this chat (text file)</button><button class="act dng" id="del_chat">Delete this chat for me only</button><p class="note">The other person keeps their copy. Messages you delete here stay on their phone.</p><button class="lnk" id="p_close">Cancel</button></div>');return;
+      modal('<div class="sheet"><strong>'+esc(label(cur))+'</strong><button class="act" id="pref_p">📌 '+(prefs[cur]&&prefs[cur].p?"Unpin":"Pin")+' chat</button><button class="act" id="pref_a">🗄️ '+(prefs[cur]&&prefs[cur].a?"Unarchive":"Archive")+' chat</button><button class="act" id="pref_m">🔇 '+(prefs[cur]&&prefs[cur].m?"Unmute":"Mute")+' chat</button>'+(isG(cur)?'<button class="act" id="g_info">👥 Group info and members</button>':'')+(cur==="shop"||isG(cur)?'':'<button class="act dng" id="blk">🚫 '+(blocked[cur]?"Unblock ":"Block ")+esc(cur)+'</button>')+(cur==="shop"?'':'<button class="act dng" id="rpt">🚩 Report '+esc(isG(cur)?"this group":cur)+'</button>')+'<button class="act" id="dis_m">⏳ Disappearing messages: '+({0:"Off",86400:"24 hours",604800:"7 days",7776000:"90 days"}[dis[cur]||0])+'</button>'+(isG(cur)?'':'<button class="act" id="once_m">👁 Send a view-once photo</button>')+'<button class="act" id="pref_u">'+(prefs[cur]&&prefs[cur].u?"✔️ Clear unread mark":"🔵 Mark as unread")+'</button><button class="act" id="loc_send">📍 Send my location</button><button class="act" id="exp_chat">⬇️ Export this chat (text file)</button><button class="act dng" id="del_chat">Delete this chat for me only</button><p class="note">The other person keeps their copy. Messages you delete here stay on their phone.</p><button class="lnk" id="p_close">Cancel</button></div>');return;
     case"del_chat":
       tx({type:"clear",with:cur});
       if(cur==="shop")chats.shop.m=[];else delete chats[cur];

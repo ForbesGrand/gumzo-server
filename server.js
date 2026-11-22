@@ -168,6 +168,8 @@ async function setup() {
   await q("create table if not exists kv(key text primary key, value text not null)");
   await q("create table if not exists push_subs(endpoint text primary key, name text not null, sub text not null)");
   await q("create table if not exists statuses(id bigserial primary key, owner text not null, kind text not null, text text not null default '', bg text not null default '#D32F2F', file_id bigint, created timestamptz default now(), expires_at timestamptz not null)");
+  await q("alter table messages add column if not exists pinned boolean not null default false");
+  await q("create table if not exists reports(id bigserial primary key, by_user text not null, who text not null, reason text not null, created timestamptz default now())");
   await q("create table if not exists status_views(status_id bigint not null, viewer text not null, primary key(status_id, viewer))");
   await q("alter table messages add column if not exists expires_at timestamptz");
   await q("create table if not exists disappear(a text not null, b text not null default '', secs int not null, primary key(a, b))");
@@ -671,7 +673,7 @@ wss.on("connection", (ws) => {
         }
 
         const h = await q(
-          'select m.id, m.from_user as "from", m.to_user as "to", m.text, m.kind, m.created as at, m.delivered_at, m.read_at, m.deleted_at, m.edited_at, m.reply_to, m.expires_at, f.once as fonce, f.viewed as fviewed, f.id as fid, f.name as fname, f.mime as fmime, f.size as fsize ' +
+          'select m.id, m.from_user as "from", m.to_user as "to", m.text, m.kind, m.created as at, m.delivered_at, m.read_at, m.deleted_at, m.edited_at, m.reply_to, m.expires_at, m.pinned, f.once as fonce, f.viewed as fviewed, f.id as fid, f.name as fname, f.mime as fmime, f.size as fsize ' +
           "from messages m left join files f on f.id=m.file_id where (m.from_user=$1 or m.to_user=$1 or m.to_user in (select 'g:'||group_id from group_members where name=$1)) " +
           "and not exists (select 1 from hidden hd where hd.name=$1 and hd.msg_id=m.id) " +
           "and m.id > coalesce((select c.up_to from cleared c where c.name=$1 and c.other = case when m.to_user like 'g:%' then m.to_user when m.from_user=$1 then m.to_user else m.from_user end), 0) " +
@@ -693,6 +695,7 @@ wss.on("connection", (ws) => {
           st: x.read_at ? "read" : x.delivered_at ? "delivered" : "sent",
           file: x.fid && !x.deleted_at ? { id: Number(x.fid), name: x.fname, mime: x.fmime, size: x.fsize, once: x.fonce, viewed: x.fviewed } : null,
           exp: x.expires_at ? new Date(x.expires_at).getTime() : null,
+          pn: !!x.pinned,
         }));
         const pf = {};
         (await q("select other, pinned, archived, muted, unread from prefs where name=$1", [name])).rows.forEach((x) => { pf[x.other] = { p: x.pinned, a: x.archived, m: x.muted, u: x.unread }; });
@@ -767,6 +770,27 @@ wss.on("connection", (ws) => {
         const id = parseInt(m.id);
         if (m.on) await q("insert into stars(name,msg_id) select $1,id from messages where id=$2 and (from_user=$1 or to_user=$1 or to_user in (select 'g:'||group_id from group_members where name=$1)) on conflict do nothing", [name, id]);
         else await q("delete from stars where name=$1 and msg_id=$2", [name, id]);
+        return;
+      }
+
+      if (m.type === "pin") {
+        const id = parseInt(m.id);
+        const r = await q("select from_user, to_user from messages where id=$1 and deleted_at is null", [id]);
+        if (!r.rows.length) return;
+        const f = r.rows[0].from_user, t = r.rows[0].to_user, grp = t.startsWith("g:");
+        if (!(grp ? await isMember(name, t) : f === name || t === name)) return;
+        if (grp) await q("update messages set pinned=false where to_user=$1 and pinned", [t]);
+        else await q("update messages set pinned=false where pinned and ((from_user=$1 and to_user=$2) or (from_user=$2 and to_user=$1))", [f, t]);
+        if (m.on) await q("update messages set pinned=true where id=$1", [id]);
+        const targets = grp ? (await q("select name from group_members where group_id=$1", [t.slice(2)])).rows.map((x) => x.name) : [f, t];
+        targets.forEach((n) => { const u = online.get(n); if (u && u.ws.readyState === 1) u.ws.send(JSON.stringify({ type: "pin", id, on: !!m.on, with: grp ? t : n === f ? t : f })); });
+        return;
+      }
+
+      if (m.type === "report") {
+        const who = String(m.who || "").slice(0, 60), why = String(m.reason || "").slice(0, 500);
+        if (!who || !why) return;
+        await q("insert into reports(by_user,who,reason) values($1,$2,$3)", [name, who, why]);
         return;
       }
 
