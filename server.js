@@ -162,6 +162,11 @@ async function setup() {
   await q("update users set show_phone=true where show_phone=false"); // phone numbers are always findable
   await q("create table if not exists files(id bigserial primary key, owner text not null, to_user text not null, name text not null, mime text not null, size int not null, data bytea not null, created timestamptz default now())");
   await q("create table if not exists resets(name text primary key, code_hash text not null, expires timestamptz not null, tries int not null default 0)");
+  await q("alter table messages add column if not exists expires_at timestamptz");
+  await q("create table if not exists disappear(a text not null, b text not null default '', secs int not null, primary key(a, b))");
+  await q("alter table files add column if not exists once boolean not null default false");
+  await q("alter table files add column if not exists viewed boolean not null default false");
+  await q("alter table prefs add column if not exists unread boolean not null default false");
 
   // The shop account is created from the SHOP_PASSWORD you set in Render. Nobody can sign up as "shop".
   if (process.env.SHOP_PASSWORD) {
@@ -213,13 +218,14 @@ function serveBinary(req, res, buf, mime, name, cache) {
 async function deliver(from, to, text, kind, fileId, file, reply) {
   const u = online.get(to);
   const live = !!(u && u.ws.readyState === 1);
+  const exp = await expiryFor(from, to);
   const r = await q(
-    "insert into messages(from_user,to_user,text,kind,file_id,reply_to,delivered_at) values($1,$2,$3,$4,$5,$6," + (live ? "now()" : "null") + ") returning id, created",
-    [from, to, text, kind, fileId, reply || null]
+    "insert into messages(from_user,to_user,text,kind,file_id,reply_to,expires_at,delivered_at) values($1,$2,$3,$4,$5,$6,$7," + (live ? "now()" : "null") + ") returning id, created",
+    [from, to, text, kind, fileId, reply || null, exp]
   );
   const id = Number(r.rows[0].id), at = r.rows[0].created;
-  if (live) u.ws.send(JSON.stringify({ type: "msg", id, from, text, kind, file: file || null, reply: reply || null, at }));
-  return { id, at, st: live ? "delivered" : "sent" };
+  if (live) u.ws.send(JSON.stringify({ type: "msg", id, from, text, kind, file: file || null, reply: reply || null, exp: exp ? exp.getTime() : null, at }));
+  return { id, at, st: live ? "delivered" : "sent", exp: exp ? exp.getTime() : null };
 }
 
 async function handler(req, res) {
@@ -444,20 +450,28 @@ async function handler(req, res) {
         if (!ex.rows.length) return json(res, 404, { error: "No user called " + to });
         if ((await q("select 1 from blocks where (name=$1 and other=$2) or (name=$2 and other=$1)", [user, to])).rows.length) return json(res, 403, { error: "You can't send to this person" });
       }
+      const once = String(req.headers["x-once"] || "") === "1" && mime.startsWith("image/");
+      if (once && grp) return json(res, 400, { error: "View once works in one-to-one chats only" });
       const used = await q("select coalesce(sum(size),0)::bigint as n from files where owner=$1", [user]);
       if (Number(used.rows[0].n) + buf.length > MAX_USER_STORE) return json(res, 400, { error: "You have reached the file limit for this account" });
-      const f = await q("insert into files(owner,to_user,name,mime,size,data) values($1,$2,$3,$4,$5,$6) returning id", [user, to, fname, mime, buf.length, buf]);
-      const file = { id: Number(f.rows[0].id), name: fname, mime, size: buf.length };
+      const f = await q("insert into files(owner,to_user,name,mime,size,data,once) values($1,$2,$3,$4,$5,$6,$7) returning id", [user, to, fname, mime, buf.length, buf, once]);
+      const file = { id: Number(f.rows[0].id), name: fname, mime, size: buf.length, once };
       const d = grp ? await deliverGroup(user, to, "", "file", file.id, file) : await deliver(user, to, "", "file", file.id, file);
-      return json(res, 200, { ok: true, id: d.id, at: d.at, st: d.st, file });
+      return json(res, 200, { ok: true, id: d.id, at: d.at, st: d.st, exp: d.exp, file });
     }
 
     m = p.match(/^\/api\/file\/(\d+)$/);
     if (m) {
-      const r = await q("select name, mime, data, owner, to_user from files where id=$1", [m[1]]);
+      const r = await q("select name, mime, data, owner, to_user, once, viewed from files where id=$1", [m[1]]);
       const f = r.rows[0];
       if (!f) return json(res, 404, { error: "File not found" });
       if (user !== f.owner && user !== f.to_user && !(f.to_user.startsWith("g:") && (await isMember(user, f.to_user)))) return json(res, 403, { error: "Not allowed" });
+      if (f.once) {
+        if (user === f.owner) return json(res, 403, { error: "Sent as view once" });
+        if (f.viewed) return json(res, 410, { error: "This photo was already opened" });
+        await q("update files set viewed=true where id=$1", [m[1]]);
+        return serveBinary(req, res, f.data, f.mime, f.name, "no-store");
+      }
       return serveBinary(req, res, f.data, f.mime, f.name, "private, max-age=86400");
     }
   }
@@ -470,6 +484,20 @@ const server = http.createServer((req, res) => {
     try { json(res, 500, { error: "Server problem. Try again in a moment." }); } catch (e2) {}
   });
 });
+
+// ---------- Disappearing messages ----------
+const dkey = (x, y) => (y.startsWith("g:") ? [y, ""] : x < y ? [x, y] : [y, x]);
+async function expiryFor(from, to) {
+  const [a, b] = dkey(from, to);
+  const r = await q("select secs from disappear where a=$1 and b=$2", [a, b]);
+  return r.rows.length && r.rows[0].secs > 0 ? new Date(Date.now() + r.rows[0].secs * 1000) : null;
+}
+async function cleanup() {
+  try {
+    await q("delete from files where id in (select file_id from messages where expires_at < now() and file_id is not null)");
+    await q("delete from messages where expires_at < now()");
+  } catch (e) { console.error("Cleanup failed:", e.message); }
+}
 
 // ---------- Groups ----------
 async function groupInfo(id) {
@@ -488,12 +516,13 @@ async function isMember(name, key) {
   return !!m && (await q("select 1 from group_members where group_id=$1 and name=$2", [m[1], name])).rows.length > 0;
 }
 async function deliverGroup(from, key, text, kind, fileId, file, reply) {
-  const r = await q("insert into messages(from_user,to_user,text,kind,file_id,reply_to) values($1,$2,$3,$4,$5,$6) returning id, created", [from, key, text, kind, fileId, reply || null]);
+  const exp = await expiryFor(from, key);
+  const r = await q("insert into messages(from_user,to_user,text,kind,file_id,reply_to,expires_at) values($1,$2,$3,$4,$5,$6,$7) returning id, created", [from, key, text, kind, fileId, reply || null, exp]);
   const id = Number(r.rows[0].id), at = r.rows[0].created;
   const ms = await q("select name from group_members where group_id=$1 and name<>$2", [key.slice(2), from]);
-  const out = JSON.stringify({ type: "msg", id, from, to: key, text, kind, file: file || null, reply: reply || null, at });
+  const out = JSON.stringify({ type: "msg", id, from, to: key, text, kind, file: file || null, reply: reply || null, exp: exp ? exp.getTime() : null, at });
   ms.rows.forEach((x) => { const u = online.get(x.name); if (u && u.ws.readyState === 1) u.ws.send(out); });
-  return { id, at, st: "sent" };
+  return { id, at, st: "sent", exp: exp ? exp.getTime() : null };
 }
 // Tell the other side (one person, or every group member) that a message was edited or deleted.
 async function fanout(to, from, obj) {
@@ -548,11 +577,11 @@ wss.on("connection", (ws) => {
         }
 
         const h = await q(
-          'select m.id, m.from_user as "from", m.to_user as "to", m.text, m.kind, m.created as at, m.delivered_at, m.read_at, m.deleted_at, m.edited_at, m.reply_to, f.id as fid, f.name as fname, f.mime as fmime, f.size as fsize ' +
+          'select m.id, m.from_user as "from", m.to_user as "to", m.text, m.kind, m.created as at, m.delivered_at, m.read_at, m.deleted_at, m.edited_at, m.reply_to, m.expires_at, f.once as fonce, f.viewed as fviewed, f.id as fid, f.name as fname, f.mime as fmime, f.size as fsize ' +
           "from messages m left join files f on f.id=m.file_id where (m.from_user=$1 or m.to_user=$1 or m.to_user in (select 'g:'||group_id from group_members where name=$1)) " +
           "and not exists (select 1 from hidden hd where hd.name=$1 and hd.msg_id=m.id) " +
           "and m.id > coalesce((select c.up_to from cleared c where c.name=$1 and c.other = case when m.to_user like 'g:%' then m.to_user when m.from_user=$1 then m.to_user else m.from_user end), 0) " +
-          "order by m.id desc limit 300", [name]);
+          "and (m.expires_at is null or m.expires_at > now()) order by m.id desc limit 300", [name]);
         const un = await q("select m.from_user as other, count(*)::int as n from messages m left join reads r on r.name=$1 and r.other=m.from_user where m.to_user=$1 and m.deleted_at is null and not exists (select 1 from hidden hd where hd.name=$1 and hd.msg_id=m.id) and m.id > coalesce(r.last_id,0) group by m.from_user", [name]);
         const unread = {};
         un.rows.forEach((x) => { unread[x.other] = x.n; });
@@ -568,15 +597,18 @@ wss.on("connection", (ws) => {
         const msgs = h.rows.reverse().map((x) => ({
           id: Number(x.id), from: x.from, to: x.to, text: x.deleted_at ? "" : x.text, kind: x.kind, at: x.at, edited: !!x.edited_at, deleted: !!x.deleted_at, reply: x.reply_to ? Number(x.reply_to) : null,
           st: x.read_at ? "read" : x.delivered_at ? "delivered" : "sent",
-          file: x.fid && !x.deleted_at ? { id: Number(x.fid), name: x.fname, mime: x.fmime, size: x.fsize } : null,
+          file: x.fid && !x.deleted_at ? { id: Number(x.fid), name: x.fname, mime: x.fmime, size: x.fsize, once: x.fonce, viewed: x.fviewed } : null,
+          exp: x.expires_at ? new Date(x.expires_at).getTime() : null,
         }));
         const pf = {};
-        (await q("select other, pinned, archived, muted from prefs where name=$1", [name])).rows.forEach((x) => { pf[x.other] = { p: x.pinned, a: x.archived, m: x.muted }; });
+        (await q("select other, pinned, archived, muted, unread from prefs where name=$1", [name])).rows.forEach((x) => { pf[x.other] = { p: x.pinned, a: x.archived, m: x.muted, u: x.unread }; });
         const blocked = (await q("select other from blocks where name=$1", [name])).rows.map((x) => x.other);
+        const dis = {};
+        (await q("select a, b, secs from disappear where a=$1 or b=$1 or a in (select 'g:'||group_id from group_members where name=$1)", [name])).rows.forEach((x) => { dis[x.a.startsWith("g:") ? x.a : x.a === name ? x.b : x.a] = x.secs; });
         const rx = {};
         if (msgs.length) (await q("select msg_id, name, emoji from reactions where msg_id = any($1)", [msgs.map((x) => x.id)])).rows.forEach((x) => { (rx[x.msg_id] = rx[x.msg_id] || {})[x.name] = x.emoji; });
         msgs.forEach((x) => { x.rx = rx[x.id] || {}; });
-        return send({ type: "history", msgs, unread, profiles, prefs: pf, blocked, groups, stars: starIds });
+        return send({ type: "history", msgs, unread, profiles, prefs: pf, blocked, groups, stars: starIds, dis });
       }
       if (!name) return fail("Join first");
 
@@ -609,14 +641,32 @@ wss.on("connection", (ws) => {
           if (!(await isMember(name, to))) return fail("You are not in this group");
           const gr = parseInt(m.reply) || null;
           const gd = await deliverGroup(name, to, text, "msg", null, null, gr);
-          return send({ type: "sent", cid: m.cid, id: gd.id, to, text, kind: "msg", file: null, reply: gr, at: gd.at, st: gd.st });
+          return send({ type: "sent", cid: m.cid, id: gd.id, to, text, kind: "msg", file: null, reply: gr, exp: gd.exp, at: gd.at, st: gd.st });
         }
         const ex = await q("select 1 from users where name=$1", [to]);
         if (!ex.rows.length) return fail("No user called " + to);
         if ((await q("select 1 from blocks where (name=$1 and other=$2) or (name=$2 and other=$1)", [name, to])).rows.length) return fail("You can't message this person");
         const reply = parseInt(m.reply) || null;
         const d = await deliver(name, to, text, "msg", null, null, reply);
-        return send({ type: "sent", cid: m.cid, id: d.id, to, text, kind: "msg", file: null, reply, at: d.at, st: d.st });
+        return send({ type: "sent", cid: m.cid, id: d.id, to, text, kind: "msg", file: null, reply, exp: d.exp, at: d.at, st: d.st });
+      }
+
+      if (m.type === "disappear") {
+        const w = String(m.with || "").toLowerCase(), secs = parseInt(m.secs) || 0;
+        if (![0, 86400, 604800, 7776000].includes(secs)) return;
+        let targets;
+        if (w.startsWith("g:")) {
+          const a = await q("select admin from group_members where group_id=$1 and name=$2", [w.slice(2), name]);
+          if (!a.rows.length || !a.rows[0].admin) return fail("Only group admins can change this");
+          targets = (await q("select name from group_members where group_id=$1", [w.slice(2)])).rows.map((x) => x.name);
+        } else {
+          if (!(await q("select 1 from users where name=$1", [w])).rows.length) return;
+          targets = [name, w];
+        }
+        const [a, b] = dkey(name, w);
+        await q("insert into disappear(a,b,secs) values($1,$2,$3) on conflict (a,b) do update set secs=excluded.secs", [a, b, secs]);
+        targets.forEach((n) => { const u = online.get(n); if (u && u.ws.readyState === 1) u.ws.send(JSON.stringify({ type: "dset", with: w.startsWith("g:") ? w : n === name ? w : name, secs })); });
+        return;
       }
 
       if (m.type === "star") {
@@ -646,6 +696,7 @@ wss.on("connection", (ws) => {
         const o = r.rows[0];
         if (!o || o.deleted_at || o.kind === "order") return fail("That message cannot be forwarded");
         if (!(o.to_user.startsWith("g:") ? await isMember(name, o.to_user) : o.from_user === name || o.to_user === name)) return fail("That message cannot be forwarded");
+        if (o.file_id && ((await q("select once from files where id=$1", [o.file_id])).rows[0] || {}).once) return fail("View-once photos cannot be forwarded");
         const grp = to.startsWith("g:");
         if (grp) { if (!(await isMember(name, to))) return fail("You are not in that group"); }
         else {
@@ -661,7 +712,7 @@ wss.on("connection", (ws) => {
         }
         const kind = o.file_id ? "file" : "msg";
         const d = grp ? await deliverGroup(name, to, text, kind, fid, file) : await deliver(name, to, text, kind, fid, file);
-        return send({ type: "sent", id: d.id, to, text, kind, file, at: d.at, st: d.st });
+        return send({ type: "sent", id: d.id, to, text, kind, file, exp: d.exp, at: d.at, st: d.st });
       }
 
       if (m.type === "gcreate") {
@@ -707,7 +758,7 @@ wss.on("connection", (ws) => {
       }
 
       if (m.type === "pref") {
-        const col = { p: "pinned", a: "archived", m: "muted" }[m.key];
+        const col = { p: "pinned", a: "archived", m: "muted", u: "unread" }[m.key];
         if (!col) return;
         await q("insert into prefs(name,other," + col + ") values($1,$2,$3) on conflict (name,other) do update set " + col + "=excluded." + col, [name, String(m.with || "").toLowerCase(), !!m.on]);
         return;
@@ -800,5 +851,5 @@ wss.on("connection", (ws) => {
 });
 
 setup()
-  .then(() => server.listen(PORT, () => console.log("Gumzo server running on http://localhost:" + PORT)))
+  .then(() => { setInterval(cleanup, 60000); return server.listen(PORT, () => console.log("Gumzo server running on http://localhost:" + PORT)); })
   .catch((e) => { console.error("Database setup failed:", e.message); process.exit(1); });
