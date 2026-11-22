@@ -113,6 +113,7 @@ html[data-theme=yellow] .hdr{background:linear-gradient(125deg,var(--red),color-
 .pri{box-shadow:0 3px 10px color-mix(in srgb,var(--red) 35%,transparent)}
 .badge{padding:2px 8px;box-shadow:0 2px 6px color-mix(in srgb,var(--red) 40%,transparent)}
 .pinbar{padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--line);font-size:13px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mn{font-weight:700;color:#1E88E5}.mnl{display:flex;gap:6px;padding:6px 10px;background:var(--panel);border-top:1px solid var(--line);overflow:auto}.mnl button{padding:4px 10px;border:1px solid var(--line);border-radius:14px}
 </style>
 </head>
 <body>
@@ -238,7 +239,7 @@ function tk(st){
   return '<svg class="tk'+(st==="read"?" r":"")+'" viewBox="0 0 18 12" width="16" height="11" role="img" aria-label="'+st+'"><path d="M1.5 6.5l3.2 3.2L11 2.3"/>'+(two?'<path d="M7 6.5l3.2 3.2L16.5 2.3"/>':'')+'</svg>';
 }
 function avh(n,cls){
-  if(isG(n))return '<span class="av '+(cls||"")+'">👥</span>';
+  if(isG(n)){var gg=groups[n];if(gg&&gg.pv&&!low)return '<span class="av '+(cls||"")+'"><img src="/gavatar/'+n.slice(2)+'?v='+gg.pv+'" alt=""></span>';return '<span class="av '+(cls||"")+'">👥</span>'}
   var p=prof[n],l=esc((n||"?")[0].toUpperCase());
   if(p&&p.av&&(!low||n===me))return '<span class="av '+(cls||"")+'"><img src="/avatar/'+encodeURIComponent(n)+'?v='+p.av+'" alt=""></span>';
   return '<span class="av '+(cls||"")+'">'+l+'</span>';
@@ -310,6 +311,7 @@ function handle(d){
     chats={shop:{m:[],un:0}};prof=d.profiles||prof;dis=d.dis||{};starred={};(d.stars||[]).forEach(function(i){starred[i]=1});prefs=d.prefs||{};groups=d.groups||{};Object.keys(groups).forEach(function(k){chat(k)});blocked={};(d.blocked||[]).forEach(function(b){blocked[b]=1});
     (d.msgs||[]).forEach(function(x){var o=isG(x.to)?x.to:x.from===me?x.to:x.from;chat(o).m.push({exp:x.exp,rx:x.rx||{},from:x.from,id:x.id,me:x.from===me?1:0,t:x.text,time:hm(x.at),ts:new Date(x.at).getTime(),st:x.st,kind:x.kind,file:x.file,ed:x.edited,del:x.deleted,rep:x.reply,pn:x.pn})});
     Object.keys(d.unread||{}).forEach(function(k){chat(k).un=+d.unread[k]});
+    var pj="";try{pj=localStorage.getItem("gz_join")||""}catch(e){}if(pj){tx({type:"gjoin",code:pj});try{localStorage.removeItem("gz_join")}catch(e){}}
     if(cur){chat(cur).un=0;tx({type:"read",with:cur});if(!isG(cur))tx({type:"presence",with:cur})}
     renderList();renderMain();return;
   }
@@ -317,6 +319,8 @@ function handle(d){
   if(t==="catalog"){catalog=d.products;renderShop();return}
   if(t==="typing"){if(d.from===cur&&$("st")){typingUntil=Date.now()+2000;$("st").textContent="typing…";setTimeout(showPres,2100)}return}
   if(t==="dset"){dis[d.with]=d.secs;if(cur===d.with&&$("hn"))$("hn").textContent=label(cur)+(d.secs?" ⏳":"");status(d.secs?"Disappearing messages are on":"Disappearing messages are off");return}
+  if(t==="ginvite"){modal('<div class="sheet"><strong>Group invite link</strong><input id="g_url" readonly value="'+location.origin+'/?join='+d.code+'"><p class="note">Anyone with this link can join the group. Send it only to people you trust.</p><button class="pri" id="g_copy">Copy link</button><button class="act" id="g_reset">Make a new link (the old one stops working)</button><button class="lnk" id="p_close">Close</button></div>');return}
+  if(t==="gjoined"){status("You joined the group");return}
   if(t==="pin"){chat(d.with).m.forEach(function(m){m.pn=(m.id===d.id)?!!d.on:false});if(cur===d.with)pinBar();return}
   if(t==="react"){
     chat(d.with).m.forEach(function(m){if(m.id===d.id){m.rx=m.rx||{};if(d.emoji)m.rx[d.name]=d.emoji;else delete m.rx[d.name]}});
@@ -370,7 +374,7 @@ function renderMain(){
   $("main").innerHTML='<div class="hdr"><button class="back" id="back" aria-label="Back to chats">‹</button><button class="who" id="who">'+avh(cur)+'<span class="grow"><strong id="hn">'+esc(label(cur))+(dis[cur]?' ⏳':'')+'</strong><small id="st"></small></span></button>'+
   (cur==="shop"?'<button class="light" id="browse">Browse products</button>':'')+'<button class="light" id="chatmenu" aria-label="Chat options">⋮</button></div>'+
   '<div class="pinbar" id="pinbar" hidden></div><div class="msgs" id="msgs"></div><div class="shop" id="shop" hidden></div>'+
-  '<div class="rb" id="rb" hidden></div><div id="emo" hidden>'+EMO.map(function(e){return '<button data-emo="'+e+'">'+e+'</button>'}).join("")+'</div><div class="bar"><button class="clip" id="clip" aria-label="Send a photo, video or file">📎</button><button class="clip" id="emob" aria-label="Emoji">😊</button><button class="clip" id="mic" aria-label="Record a voice note">🎤</button><input id="in" placeholder="Write a message" aria-label="Write a message" autocomplete="off"><button class="pri" id="send">Send</button></div>';
+  '<div class="mnl" id="mnl" hidden></div><div class="rb" id="rb" hidden></div><div id="emo" hidden>'+EMO.map(function(e){return '<button data-emo="'+e+'">'+e+'</button>'}).join("")+'</div><div class="bar"><button class="clip" id="clip" aria-label="Send a photo, video or file">📎</button><button class="clip" id="emob" aria-label="Emoji">😊</button><button class="clip" id="mic" aria-label="Record a voice note">🎤</button><input id="in" placeholder="Write a message" aria-label="Write a message" autocomplete="off"><button class="pri" id="send">Send</button></div>';
   renderMsgs();showPres();showReply();
 }
 function fileHtml(m,i){
@@ -424,11 +428,25 @@ function sendLoc(){
     chat(cur).m.push({cid:cid,me:1,t:v,time:now(),st:"pending",kind:"msg"});tx({type:"msg",to:cur,text:v,cid:cid});renderMsgs();renderList();
   },function(){status("Allow location access to share it")});
 }
+(function(){var jc=new URLSearchParams(location.search).get("join");if(jc){try{localStorage.setItem("gz_join",jc)}catch(e){}history.replaceState(null,"","/")}})();
+document.addEventListener("change",function(e){
+  if(e.target.id==="g_pic"&&e.target.files[0]){var im=new Image(),gid=cur;
+    im.onload=function(){var c=document.createElement("canvas");c.width=c.height=192;var s=Math.min(im.width,im.height);c.getContext("2d").drawImage(im,(im.width-s)/2,(im.height-s)/2,s,s,0,0,192,192);tx({type:"gphoto",id:gid,photo:c.toDataURL("image/jpeg",0.8)});closeModal();status("Updating group picture…")};
+    im.src=URL.createObjectURL(e.target.files[0])}
+});
+document.addEventListener("input",function(e){
+  var b=$("mnl");if(e.target.id!=="in"||!b)return;
+  var mt=isG(cur)&&groups[cur]&&/(^|\s)@([a-z0-9_]*)$/i.exec(e.target.value);
+  if(!mt){b.hidden=true;return}
+  var ms=groups[cur].members.map(function(x){return x.n}).filter(function(n){return n!==me&&n.indexOf(mt[2].toLowerCase())===0}).slice(0,5);
+  b.innerHTML=ms.map(function(n){return '<button data-mn="'+esc(n)+'">@'+esc(n)+'</button>'}).join("");b.hidden=!ms.length;
+});
+document.addEventListener("click",function(e){var b=e.target.closest("[data-mn]");if(!b)return;var i=$("in");i.value=i.value.replace(/@([a-z0-9_]*)$/i,"@"+b.dataset.mn+" ");$("mnl").hidden=true;i.focus()});
 function pinBar(){var b=$("pinbar");if(!b||!cur)return;var pm=chat(cur).m.filter(function(m){return m.pn&&!m.del})[0];if(!pm){b.hidden=true;return}b.hidden=false;b.innerHTML="📌 "+esc((pm.t||(pm.file?"Attachment":"Message")).slice(0,80))}
 function renderMsgs(){pinBar();
   if(!cur||!$("msgs"))return;
   var h="";chats[cur].m.forEach(function(m,i){
-    h+='<div class="m'+(m.me?' me':'')+'" data-mi="'+i+'">'+(isG(cur)&&!m.me&&!m.del?'<div class="sn">'+esc(m.from||"")+'</div>':'')+(m.del?'<div class="dl">🚫 This message was deleted</div>':qhtml(m)+(m.file?fileHtml(m,i):'')+(m.t?'<div>'+esc(m.t).replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>')+'</div>':''))+rxhtml(m)+'<time>'+(starred[m.id]?'⭐ ':'')+(m.ed&&!m.del?'edited · ':'')+m.time+(m.me&&!m.del?' '+tk(m.st):'')+'</time></div>';
+    h+='<div class="m'+(m.me?' me':'')+'" data-mi="'+i+'">'+(isG(cur)&&!m.me&&!m.del?'<div class="sn">'+esc(m.from||"")+'</div>':'')+(m.del?'<div class="dl">🚫 This message was deleted</div>':qhtml(m)+(m.file?fileHtml(m,i):'')+(m.t?'<div>'+esc(m.t).replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>').replace(/(^|\s)@([a-z0-9_]{3,20})/gi,'$1<b class="mn">@$2</b>')+'</div>':''))+rxhtml(m)+'<time>'+(starred[m.id]?'⭐ ':'')+(m.ed&&!m.del?'edited · ':'')+m.time+(m.me&&!m.del?' '+tk(m.st):'')+'</time></div>';
   });
   var el=$("msgs");el.innerHTML=h||'<div class="empty">No messages yet. Say hi 👋</div>';el.scrollTop=el.scrollHeight;
 }
@@ -552,6 +570,7 @@ function openGroup(){
   var h='<div class="sheet"><strong style="font-size:18px">'+esc(g.name)+'</strong><p class="note">'+g.members.length+' members</p>';
   g.members.forEach(function(x){h+='<div class="cen" style="justify-content:space-between"><span>'+esc(x.n)+(x.a?' <small class="note">admin</small>':'')+(x.n===me?' (you)':'')+'</span>'+(adm&&x.n!==me?'<button class="lnk" data-grm="'+esc(x.n)+'">Remove</button>':'')+'</div>'});
   if(adm)h+='<div class="row2"><input id="g_add" placeholder="Add a friend by name" autocapitalize="none"><button class="pri" id="g_addb">Add</button></div>';
+  if(adm)h+='<label class="act" style="cursor:pointer">🖼️ Change group picture<input type="file" id="g_pic" accept="image/*" hidden></label><button class="act" id="g_inv">🔗 Invite link</button>';
   modal(h+'<button class="act dng" id="g_leave">Leave group</button><button class="lnk" id="p_close">Close</button></div>');
 }
 function u8(b){var p="=".repeat((4-b.length%4)%4),r=atob((b+p).replace(/-/g,"+").replace(/_/g,"/")),o=new Uint8Array(r.length);for(var i=0;i<r.length;i++)o[i]=r.charCodeAt(i);return o}
@@ -682,6 +701,9 @@ document.addEventListener("click",function(e){
     case"newg":return newGroup();
     case"g_info":closeModal();return openGroup();
     case"g_create":tx({type:"gcreate",name:$("g_name").value,members:$("g_mem").value.split(",")});closeModal();status("Creating group…");return;
+    case"g_inv":tx({type:"ginvite",id:cur});return;
+    case"g_reset":tx({type:"ginvite",id:cur,reset:true});return;
+    case"g_copy":{var gu=$("g_url");gu.select();try{navigator.clipboard.writeText(gu.value)}catch(e){document.execCommand("copy")}status("Link copied");return}
     case"g_addb":var an=$("g_add").value.trim();if(an)tx({type:"gadd",id:cur,name:an});closeModal();return;
     case"g_leave":if(confirm("Leave this group?")){tx({type:"gleave",id:cur});closeModal()}return;
     case"back":$("app").classList.remove("open");return;

@@ -170,6 +170,10 @@ async function setup() {
   await q("create table if not exists statuses(id bigserial primary key, owner text not null, kind text not null, text text not null default '', bg text not null default '#D32F2F', file_id bigint, created timestamptz default now(), expires_at timestamptz not null)");
   await q("alter table messages add column if not exists pinned boolean not null default false");
   await q("create table if not exists reports(id bigserial primary key, by_user text not null, who text not null, reason text not null, created timestamptz default now())");
+  await q("alter table chat_groups add column if not exists photo bytea");
+  await q("alter table chat_groups add column if not exists photo_mime text");
+  await q("alter table chat_groups add column if not exists photo_v int not null default 0");
+  await q("create table if not exists group_invites(code text primary key, group_id bigint not null, created_by text not null, created timestamptz default now())");
   await q("create table if not exists status_views(status_id bigint not null, viewer text not null, primary key(status_id, viewer))");
   await q("alter table messages add column if not exists expires_at timestamptz");
   await q("create table if not exists disappear(a text not null, b text not null default '', secs int not null, primary key(a, b))");
@@ -251,6 +255,12 @@ async function handler(req, res) {
   if (p === "/api/products") return json(res, 200, products);
 
   // ---------- Profile pictures (shown to everyone) ----------
+  const gm = p.match(/^\/gavatar\/(\d+)$/);
+  if (gm) {
+    const r = await q("select photo, photo_mime from chat_groups where id=$1", [gm[1]]);
+    if (!r.rows.length || !r.rows[0].photo) { res.writeHead(404); return res.end(); }
+    return serveBinary(req, res, r.rows[0].photo, r.rows[0].photo_mime || "image/jpeg", "group", url.searchParams.get("v") ? "public, max-age=31536000, immutable" : "no-cache");
+  }
   let m = p.match(/^\/avatar\/([a-z0-9_]{3,20})$/);
   if (m) {
     const r = await q("select avatar, avatar_mime from users where name=$1", [m[1]]);
@@ -595,10 +605,10 @@ async function cleanup() {
 
 // ---------- Groups ----------
 async function groupInfo(id) {
-  const g = await q("select id, name from chat_groups where id=$1", [id]);
+  const g = await q("select id, name, photo_v from chat_groups where id=$1", [id]);
   if (!g.rows.length) return null;
   const m = await q("select name, admin from group_members where group_id=$1 order by admin desc, name", [id]);
-  return { key: "g:" + id, name: g.rows[0].name, members: m.rows.map((x) => ({ n: x.name, a: x.admin })) };
+  return { key: "g:" + id, name: g.rows[0].name, pv: g.rows[0].photo_v, members: m.rows.map((x) => ({ n: x.name, a: x.admin })) };
 }
 async function pushGroup(id) {
   const g = await groupInfo(id);
@@ -617,7 +627,10 @@ async function deliverGroup(from, key, text, kind, fileId, file, reply) {
   const out = JSON.stringify({ type: "msg", id, from, to: key, text, kind, file: file || null, reply: reply || null, exp: exp ? exp.getTime() : null, at });
   ms.rows.forEach((x) => { const u = online.get(x.name); if (u && u.ws.readyState === 1) u.ws.send(out); });
   const gn = (await q("select name from chat_groups where id=$1", [key.slice(2)])).rows[0];
-  notify(ms.rows.map((x) => x.name), key, gn ? gn.name : "Group", from + ": " + prevText(text, kind, file)).catch(() => {});
+  const ment = new Set([...String(text || "").toLowerCase().matchAll(/@([a-z0-9_]{3,20})/g)].map((x) => x[1]));
+  const others = ms.rows.map((x) => x.name);
+  notify(others.filter((n) => !ment.has(n)), key, gn ? gn.name : "Group", from + ": " + prevText(text, kind, file)).catch(() => {});
+  if (others.some((n) => ment.has(n))) notify(others.filter((n) => ment.has(n)), key, gn ? gn.name : "Group", from + " mentioned you: " + prevText(text, kind, file)).catch(() => {});
   return { id, at, st: "sent", exp: exp ? exp.getTime() : null };
 }
 // Tell the other side (one person, or every group member) that a message was edited or deleted.
@@ -771,6 +784,37 @@ wss.on("connection", (ws) => {
         if (m.on) await q("insert into stars(name,msg_id) select $1,id from messages where id=$2 and (from_user=$1 or to_user=$1 or to_user in (select 'g:'||group_id from group_members where name=$1)) on conflict do nothing", [name, id]);
         else await q("delete from stars where name=$1 and msg_id=$2", [name, id]);
         return;
+      }
+
+      if (m.type === "gphoto") {
+        const gid = parseInt(String(m.id).replace("g:", ""));
+        const adm = await q("select admin from group_members where group_id=$1 and name=$2", [gid, name]);
+        if (!adm.rows.length || !adm.rows[0].admin) return fail("Only group admins can change the picture");
+        const mm = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(String(m.photo || ""));
+        if (!mm || mm[1].length > 120000) return fail("That picture is too big");
+        await q("update chat_groups set photo=$2, photo_mime='image/jpeg', photo_v=photo_v+1 where id=$1", [gid, Buffer.from(mm[1], "base64")]);
+        return pushGroup(gid);
+      }
+
+      if (m.type === "ginvite") {
+        const gid = parseInt(String(m.id).replace("g:", ""));
+        const adm = await q("select admin from group_members where group_id=$1 and name=$2", [gid, name]);
+        if (!adm.rows.length || !adm.rows[0].admin) return fail("Only group admins can make invite links");
+        if (m.reset) await q("delete from group_invites where group_id=$1", [gid]);
+        let c = (await q("select code from group_invites where group_id=$1 limit 1", [gid])).rows[0];
+        if (!c) { c = { code: crypto.randomBytes(9).toString("base64url") }; await q("insert into group_invites(code,group_id,created_by) values($1,$2,$3)", [c.code, gid, name]); }
+        return send({ type: "ginvite", code: c.code });
+      }
+
+      if (m.type === "gjoin") {
+        const r = await q("select group_id from group_invites where code=$1", [String(m.code || "").slice(0, 40)]);
+        if (!r.rows.length) return fail("This invite link is not valid any more");
+        const gid = r.rows[0].group_id;
+        const cnt = (await q("select count(*)::int as n from group_members where group_id=$1", [gid])).rows[0].n;
+        if (cnt >= 100) return fail("This group is full");
+        await q("insert into group_members(group_id,name) values($1,$2) on conflict do nothing", [gid, name]);
+        await pushGroup(gid);
+        return send({ type: "gjoined", key: "g:" + gid });
       }
 
       if (m.type === "pin") {
