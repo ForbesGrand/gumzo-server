@@ -145,6 +145,8 @@ async function setup() {
   await q("alter table users add column if not exists theme text not null default 'red'");
   await q("alter table users add column if not exists chat_bg text not null default 'default'");
   await q("alter table users add column if not exists last_seen timestamptz");
+  await q("create table if not exists chat_groups(id bigserial primary key, name text not null, owner text not null, created timestamptz default now())");
+  await q("create table if not exists group_members(group_id bigint not null, name text not null, admin boolean not null default false, primary key(group_id, name))");
   await q("alter table users add column if not exists about text");
   await q("alter table users add column if not exists hide_seen boolean not null default false");
   await q("alter table users add column if not exists no_receipts boolean not null default false");
@@ -432,14 +434,19 @@ async function handler(req, res) {
       if (!buf) return json(res, 413, { error: "File is too big. The limit is 8 MB." });
       if (!buf.length) return json(res, 400, { error: "That file is empty" });
       if (to === user) return json(res, 400, { error: "You cannot send files to yourself" });
-      const ex = await q("select 1 from users where name=$1", [to]);
-      if (!ex.rows.length) return json(res, 404, { error: "No user called " + to });
-      if ((await q("select 1 from blocks where (name=$1 and other=$2) or (name=$2 and other=$1)", [user, to])).rows.length) return json(res, 403, { error: "You can't send to this person" });
+      const grp = to.startsWith("g:");
+      if (grp) {
+        if (!(await isMember(user, to))) return json(res, 403, { error: "You are not in this group" });
+      } else {
+        const ex = await q("select 1 from users where name=$1", [to]);
+        if (!ex.rows.length) return json(res, 404, { error: "No user called " + to });
+        if ((await q("select 1 from blocks where (name=$1 and other=$2) or (name=$2 and other=$1)", [user, to])).rows.length) return json(res, 403, { error: "You can't send to this person" });
+      }
       const used = await q("select coalesce(sum(size),0)::bigint as n from files where owner=$1", [user]);
       if (Number(used.rows[0].n) + buf.length > MAX_USER_STORE) return json(res, 400, { error: "You have reached the file limit for this account" });
       const f = await q("insert into files(owner,to_user,name,mime,size,data) values($1,$2,$3,$4,$5,$6) returning id", [user, to, fname, mime, buf.length, buf]);
       const file = { id: Number(f.rows[0].id), name: fname, mime, size: buf.length };
-      const d = await deliver(user, to, "", "file", file.id, file);
+      const d = grp ? await deliverGroup(user, to, "", "file", file.id, file) : await deliver(user, to, "", "file", file.id, file);
       return json(res, 200, { ok: true, id: d.id, at: d.at, st: d.st, file });
     }
 
@@ -448,7 +455,7 @@ async function handler(req, res) {
       const r = await q("select name, mime, data, owner, to_user from files where id=$1", [m[1]]);
       const f = r.rows[0];
       if (!f) return json(res, 404, { error: "File not found" });
-      if (user !== f.owner && user !== f.to_user) return json(res, 403, { error: "Not allowed" });
+      if (user !== f.owner && user !== f.to_user && !(f.to_user.startsWith("g:") && (await isMember(user, f.to_user)))) return json(res, 403, { error: "Not allowed" });
       return serveBinary(req, res, f.data, f.mime, f.name, "private, max-age=86400");
     }
   }
@@ -461,6 +468,37 @@ const server = http.createServer((req, res) => {
     try { json(res, 500, { error: "Server problem. Try again in a moment." }); } catch (e2) {}
   });
 });
+
+// ---------- Groups ----------
+async function groupInfo(id) {
+  const g = await q("select id, name from chat_groups where id=$1", [id]);
+  if (!g.rows.length) return null;
+  const m = await q("select name, admin from group_members where group_id=$1 order by admin desc, name", [id]);
+  return { key: "g:" + id, name: g.rows[0].name, members: m.rows.map((x) => ({ n: x.name, a: x.admin })) };
+}
+async function pushGroup(id) {
+  const g = await groupInfo(id);
+  if (!g) return;
+  g.members.forEach((m) => { const u = online.get(m.n); if (u && u.ws.readyState === 1) u.ws.send(JSON.stringify({ type: "group", group: g })); });
+}
+async function isMember(name, key) {
+  const m = /^g:(\d+)$/.exec(key);
+  return !!m && (await q("select 1 from group_members where group_id=$1 and name=$2", [m[1], name])).rows.length > 0;
+}
+async function deliverGroup(from, key, text, kind, fileId, file, reply) {
+  const r = await q("insert into messages(from_user,to_user,text,kind,file_id,reply_to) values($1,$2,$3,$4,$5,$6) returning id, created", [from, key, text, kind, fileId, reply || null]);
+  const id = Number(r.rows[0].id), at = r.rows[0].created;
+  const ms = await q("select name from group_members where group_id=$1 and name<>$2", [key.slice(2), from]);
+  const out = JSON.stringify({ type: "msg", id, from, to: key, text, kind, file: file || null, reply: reply || null, at });
+  ms.rows.forEach((x) => { const u = online.get(x.name); if (u && u.ws.readyState === 1) u.ws.send(out); });
+  return { id, at, st: "sent" };
+}
+// Tell the other side (one person, or every group member) that a message was edited or deleted.
+async function fanout(to, from, obj) {
+  const grp = to.startsWith("g:");
+  const names = grp ? (await q("select name from group_members where group_id=$1 and name<>$2", [to.slice(2), from])).rows.map((x) => x.name) : [to];
+  names.forEach((n) => { const u = online.get(n); if (u && u.ws.readyState === 1) u.ws.send(JSON.stringify({ ...obj, with: grp ? to : from })); });
+}
 
 // ---------- Online / last seen ----------
 async function getPresence(n) {
@@ -509,13 +547,16 @@ wss.on("connection", (ws) => {
 
         const h = await q(
           'select m.id, m.from_user as "from", m.to_user as "to", m.text, m.kind, m.created as at, m.delivered_at, m.read_at, m.deleted_at, m.edited_at, m.reply_to, f.id as fid, f.name as fname, f.mime as fmime, f.size as fsize ' +
-          "from messages m left join files f on f.id=m.file_id where (m.from_user=$1 or m.to_user=$1) " +
+          "from messages m left join files f on f.id=m.file_id where (m.from_user=$1 or m.to_user=$1 or m.to_user in (select 'g:'||group_id from group_members where name=$1)) " +
           "and not exists (select 1 from hidden hd where hd.name=$1 and hd.msg_id=m.id) " +
-          "and m.id > coalesce((select c.up_to from cleared c where c.name=$1 and c.other = case when m.from_user=$1 then m.to_user else m.from_user end), 0) " +
+          "and m.id > coalesce((select c.up_to from cleared c where c.name=$1 and c.other = case when m.to_user like 'g:%' then m.to_user when m.from_user=$1 then m.to_user else m.from_user end), 0) " +
           "order by m.id desc limit 300", [name]);
         const un = await q("select m.from_user as other, count(*)::int as n from messages m left join reads r on r.name=$1 and r.other=m.from_user where m.to_user=$1 and m.deleted_at is null and not exists (select 1 from hidden hd where hd.name=$1 and hd.msg_id=m.id) and m.id > coalesce(r.last_id,0) group by m.from_user", [name]);
         const unread = {};
         un.rows.forEach((x) => { unread[x.other] = x.n; });
+        (await q("select m.to_user as other, count(*)::int as n from messages m join group_members gm on gm.name=$1 and ('g:'||gm.group_id)=m.to_user left join reads r on r.name=$1 and r.other=m.to_user where m.from_user<>$1 and m.deleted_at is null and not exists (select 1 from hidden hd where hd.name=$1 and hd.msg_id=m.id) and m.id>coalesce(r.last_id,0) group by m.to_user", [name])).rows.forEach((x) => { unread[x.other] = x.n; });
+        const groups = {};
+        for (const g of (await q("select group_id from group_members where name=$1", [name])).rows) { const gi = await groupInfo(g.group_id); if (gi) groups[gi.key] = gi; }
         const names = new Set([name, "shop"]);
         h.rows.forEach((x) => names.add(x.from === name ? x.to : x.from));
         const pr = await q("select name, avatar_v, phone, about from users where name = any($1)", [[...names]]);
@@ -529,12 +570,16 @@ wss.on("connection", (ws) => {
         const pf = {};
         (await q("select other, pinned, archived, muted from prefs where name=$1", [name])).rows.forEach((x) => { pf[x.other] = { p: x.pinned, a: x.archived, m: x.muted }; });
         const blocked = (await q("select other from blocks where name=$1", [name])).rows.map((x) => x.other);
-        return send({ type: "history", msgs, unread, profiles, prefs: pf, blocked });
+        return send({ type: "history", msgs, unread, profiles, prefs: pf, blocked, groups });
       }
       if (!name) return fail("Join first");
 
       if (m.type === "read") {
         const other = String(m.with || "").toLowerCase();
+        if (other.startsWith("g:")) {
+          await q("insert into reads(name,other,last_id) select $1,$2,coalesce(max(id),0) from messages where to_user=$2 on conflict (name,other) do update set last_id = excluded.last_id", [name, other]);
+          return;
+        }
         const nrc = await q("select no_receipts from users where name=$1", [name]);
         if (nrc.rows[0] && nrc.rows[0].no_receipts) {
           await q("insert into reads(name,other,last_id) select $1,$2,coalesce(max(id),0) from messages where to_user=$1 and from_user=$2 on conflict (name,other) do update set last_id = excluded.last_id", [name, other]);
@@ -554,12 +599,60 @@ wss.on("connection", (ws) => {
         const to = String(m.to || "").toLowerCase();
         if (!to || !text) return;
         if (to === name) return fail("You cannot message yourself");
+        if (to.startsWith("g:")) {
+          if (!(await isMember(name, to))) return fail("You are not in this group");
+          const gr = parseInt(m.reply) || null;
+          const gd = await deliverGroup(name, to, text, "msg", null, null, gr);
+          return send({ type: "sent", cid: m.cid, id: gd.id, to, text, kind: "msg", file: null, reply: gr, at: gd.at, st: gd.st });
+        }
         const ex = await q("select 1 from users where name=$1", [to]);
         if (!ex.rows.length) return fail("No user called " + to);
         if ((await q("select 1 from blocks where (name=$1 and other=$2) or (name=$2 and other=$1)", [name, to])).rows.length) return fail("You can't message this person");
         const reply = parseInt(m.reply) || null;
         const d = await deliver(name, to, text, "msg", null, null, reply);
         return send({ type: "sent", cid: m.cid, id: d.id, to, text, kind: "msg", file: null, reply, at: d.at, st: d.st });
+      }
+
+      if (m.type === "gcreate") {
+        const gname = String(m.name || "").trim().slice(0, 40);
+        if (!gname) return fail("Give the group a name");
+        const names = [...new Set((m.members || []).map((x) => String(x).trim().toLowerCase()).filter(Boolean))].filter((x) => x !== name).slice(0, 50);
+        if (!names.length) return fail("Add at least one friend");
+        const ex = await q("select name from users where name = any($1)", [names]);
+        const missing = names.filter((n) => !ex.rows.some((r) => r.name === n));
+        if (missing.length) return fail("No user called " + missing[0]);
+        const g = await q("insert into chat_groups(name,owner) values($1,$2) returning id", [gname, name]);
+        const gid = g.rows[0].id;
+        await q("insert into group_members(group_id,name,admin) values($1,$2,true)", [gid, name]);
+        for (const n of names) await q("insert into group_members(group_id,name) values($1,$2)", [gid, n]);
+        return pushGroup(gid);
+      }
+
+      if (m.type === "gadd" || m.type === "gremove" || m.type === "gleave") {
+        const gid = parseInt(String(m.id).replace("g:", ""));
+        const key = "g:" + gid;
+        const me = await q("select admin from group_members where group_id=$1 and name=$2", [gid, name]);
+        if (!me.rows.length) return fail("You are not in this group");
+        const target = String(m.name || "").trim().toLowerCase();
+        if (m.type === "gleave") {
+          await q("delete from group_members where group_id=$1 and name=$2", [gid, name]);
+          send({ type: "gleft", key });
+          const left = await q("select name, admin from group_members where group_id=$1", [gid]);
+          if (!left.rows.length) { await q("delete from chat_groups where id=$1", [gid]); return; }
+          if (!left.rows.some((x) => x.admin)) await q("update group_members set admin=true where group_id=$1 and name=$2", [gid, left.rows[0].name]);
+          return pushGroup(gid);
+        }
+        if (!me.rows[0].admin) return fail("Only group admins can do that");
+        if (m.type === "gadd") {
+          const ex = await q("select 1 from users where name=$1", [target]);
+          if (!ex.rows.length) return fail("No user called " + target);
+          await q("insert into group_members(group_id,name) values($1,$2) on conflict do nothing", [gid, target]);
+        } else {
+          await q("delete from group_members where group_id=$1 and name=$2", [gid, target]);
+          const u = online.get(target);
+          if (u && u.ws.readyState === 1) u.ws.send(JSON.stringify({ type: "gleft", key }));
+        }
+        return pushGroup(gid);
       }
 
       if (m.type === "pref") {
@@ -591,8 +684,7 @@ wss.on("connection", (ws) => {
         if (!r.rows.length) return fail("You can only edit your own text messages, within 2 minutes of sending");
         const to = r.rows[0].to_user;
         send({ type: "edited", id, text, with: to });
-        const u = online.get(to);
-        if (u && u.ws.readyState === 1) u.ws.send(JSON.stringify({ type: "edited", id, text, with: name }));
+        await fanout(to, name, { type: "edited", id, text });
         return;
       }
 
@@ -605,8 +697,7 @@ wss.on("connection", (ws) => {
           if (old.rows[0].file_id) await q("delete from files where id=$1", [old.rows[0].file_id]);
           const to = old.rows[0].to_user;
           send({ type: "deleted", id, with: to });
-          const u = online.get(to);
-          if (u && u.ws.readyState === 1) u.ws.send(JSON.stringify({ type: "deleted", id, with: name }));
+          await fanout(to, name, { type: "deleted", id });
         } else {
           await q("insert into hidden(name,msg_id) select $1, id from messages where id=$2 and (from_user=$1 or to_user=$1) on conflict do nothing", [name, id]);
         }
@@ -615,7 +706,7 @@ wss.on("connection", (ws) => {
 
       if (m.type === "clear") {
         const other = String(m.with || "").toLowerCase();
-        await q("insert into cleared(name,other,up_to) select $1,$2,coalesce(max(id),0) from messages where (from_user=$1 and to_user=$2) or (from_user=$2 and to_user=$1) on conflict (name,other) do update set up_to = excluded.up_to", [name, other]);
+        await q("insert into cleared(name,other,up_to) select $1,$2,coalesce(max(id),0) from messages where (from_user=$1 and to_user=$2) or (from_user=$2 and to_user=$1) or to_user=$2 on conflict (name,other) do update set up_to = excluded.up_to", [name, other]);
         await q("insert into reads(name,other,last_id) select $1,$2,coalesce(max(id),0) from messages where to_user=$1 and from_user=$2 on conflict (name,other) do update set last_id = excluded.last_id", [name, other]);
         return;
       }
