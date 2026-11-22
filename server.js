@@ -142,6 +142,9 @@ async function setup() {
   await q("alter table messages add column if not exists delivered_at timestamptz");
   await q("alter table messages add column if not exists read_at timestamptz");
   if (!had.rows.length) await q("update messages set delivered_at=created, read_at=created"); // old messages count as read
+  await q("alter table users add column if not exists theme text not null default 'red'");
+  await q("alter table users add column if not exists chat_bg text not null default 'default'");
+  await q("alter table users add column if not exists last_seen timestamptz");
   await q("alter table messages add column if not exists deleted_at timestamptz");
   await q("alter table messages add column if not exists edited_at timestamptz");
   await q("create table if not exists hidden(name text not null, msg_id bigint not null, primary key(name, msg_id))");
@@ -335,9 +338,9 @@ async function handler(req, res) {
     if (!user) return json(res, 401, { error: "Please log in again" });
 
     if (p === "/api/me") {
-      const r = await q("select name, phone, email, show_phone, avatar_v from users where name=$1", [user]);
+      const r = await q("select name, phone, email, show_phone, avatar_v, theme, chat_bg from users where name=$1", [user]);
       const x = r.rows[0];
-      return json(res, 200, { name: x.name, phone: x.phone, email: x.email, show_phone: x.show_phone, av: x.avatar_v });
+      return json(res, 200, { name: x.name, phone: x.phone, email: x.email, show_phone: x.show_phone, av: x.avatar_v, theme: x.theme, bg: x.chat_bg });
     }
 
     if (p === "/api/find") {
@@ -375,6 +378,14 @@ async function handler(req, res) {
         throw e;
       }
       return json(res, 200, { ok: true, phone, email, show_phone: show });
+    }
+
+    if (req.method === "POST" && p === "/api/settings") {
+      const b = await readBody(req);
+      const theme = String(b.theme || "red"), bg = String(b.bg || "default");
+      if (!["red", "blue", "yellow", "green"].includes(theme) || !["default", "red", "blue", "yellow", "green"].includes(bg)) return json(res, 400, { error: "Unknown colour" });
+      await q("update users set theme=$1, chat_bg=$2 where name=$3", [theme, bg, user]);
+      return json(res, 200, { ok: true });
     }
 
     if (req.method === "POST" && p === "/api/avatar") {
@@ -429,6 +440,19 @@ const server = http.createServer((req, res) => {
   });
 });
 
+// ---------- Online / last seen ----------
+async function getPresence(n) {
+  const u = online.get(n);
+  if (u && u.ws.readyState === 1) return { type: "presence", name: n, online: true, last: null };
+  const r = await q("select last_seen from users where name=$1", [n]);
+  return { type: "presence", name: n, online: false, last: r.rows[0] && r.rows[0].last_seen ? r.rows[0].last_seen : null };
+}
+// Tell everyone who has this person's chat open that they just came online or went offline.
+async function announce(n) {
+  const p = JSON.stringify(await getPresence(n));
+  for (const u of online.values()) if (u.watching === n && !u.lowData && u.ws.readyState === 1) u.ws.send(p);
+}
+
 // ---------- Chat (WebSocket) ----------
 const wss = new WebSocketServer({ server, perMessageDeflate: true, maxPayload: 100000 });
 
@@ -446,8 +470,9 @@ wss.on("connection", (ws) => {
         const r = await q("select name from sessions where token=$1", [String(m.token || "")]);
         if (!r.rows.length) return send({ type: "auth" });
         name = r.rows[0].name;
-        online.set(name, { ws, lowData: !!m.lowData });
+        online.set(name, { ws, lowData: !!m.lowData, watching: null });
         send({ type: "joined", name });
+        announce(name).catch(() => {});
 
         // Everything waiting for this person is now "delivered": tell the senders (second grey tick).
         const dv = await q("update messages set delivered_at=now() where to_user=$1 and delivered_at is null returning id, from_user", [name]);
@@ -501,6 +526,12 @@ wss.on("connection", (ws) => {
         if (!ex.rows.length) return fail("No user called " + to);
         const d = await deliver(name, to, text, "msg", null, null);
         return send({ type: "sent", cid: m.cid, id: d.id, to, text, kind: "msg", file: null, at: d.at, st: d.st });
+      }
+
+      if (m.type === "presence") {
+        const w = String(m.with || "").toLowerCase();
+        online.get(name).watching = w;
+        return send(await getPresence(w));
       }
 
       if (m.type === "edit") {
@@ -569,8 +600,11 @@ wss.on("connection", (ws) => {
     }
   });
 
-  ws.on("close", () => {
-    if (name && online.get(name) && online.get(name).ws === ws) online.delete(name);
+  ws.on("close", async () => {
+    if (name && online.get(name) && online.get(name).ws === ws) {
+      online.delete(name);
+      try { await q("update users set last_seen=now() where name=$1", [name]); await announce(name); } catch (e) {}
+    }
   });
 });
 
