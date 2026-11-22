@@ -154,6 +154,7 @@ html,button,input,textarea{font-family:system-ui,-apple-system,"Segoe UI","Apple
 .selbar{display:flex;gap:5px;padding:8px;overflow-x:auto;position:sticky;top:0;background:#FFF3C4;z-index:3;border-bottom:1px solid #E7CC78}.selbar button{flex:none;padding:7px 9px;border-radius:12px;background:#F5DF9A;color:#382900;font-size:13px}.selbar .selcount{padding:7px 3px;font-weight:700}.row.selected{background:#F5DF9A}.selmark{width:22px;height:22px;border:2px solid #B88912;border-radius:50%;display:grid;place-items:center;flex:none;margin:0 4px;color:#382900}.row.selected .selmark{background:#D4A017}
 .support-sheet{width:min(94vw,650px);max-height:88vh;overflow:auto;gap:10px}.support-sheet textarea{width:100%;resize:vertical;min-height:52px}.support-sheet label{display:flex;flex-direction:column;gap:5px}.support-sheet #help_tickets,.support-sheet #admin_inbox{display:flex;flex-direction:column;gap:8px;max-height:38vh;overflow:auto}.ticket{padding:10px;border:1px solid #E7CC78;border-radius:14px;background:#FFF9E8;overflow-wrap:anywhere}.ticket small{display:block;color:#806A34;margin-top:3px}.ticket p{white-space:pre-wrap;margin:8px 0}.ticket-reply{border-left:3px solid #D4A017;padding-left:8px}.support-actions{display:flex;gap:8px;flex-wrap:wrap}.support-actions button{padding:7px 10px;border-radius:10px;background:#F5DF9A;color:#382900}
 .m{font-size:calc(16px*var(--fs,1))}.rm b,.bar input{font-size:calc(16px*var(--fs,1))}.rm small{font-size:calc(13px*var(--fs,1))}
+.stk{font-size:64px;line-height:1.1;text-align:center;padding:2px 6px}
 </style>
 </head>
 <body>
@@ -304,6 +305,7 @@ function avh(n,cls){
 }
 function preview(m){
   if(m.del)return "🚫 This message was deleted";
+  if(m.t&&m.t.indexOf("::s:")===0)return "🎭 Sticker";
   if(m.kind==="file"&&m.file){
     if(m.file.once)return "👁 View once photo";
     if(/^image\//.test(m.file.mime))return "📷 Photo";
@@ -685,7 +687,7 @@ function pinBar(){var b=$("pinbar");if(!b||!cur)return;var pm=chat(cur).m.filter
 function renderMsgs(){pinBar();
   if(!cur||!$("msgs"))return;
   var h="";chats[cur].m.forEach(function(m,i){
-    h+='<div class="m'+(m.me?' me':'')+'" data-mi="'+i+'">'+(isG(cur)&&!m.me&&!m.del?'<div class="sn">'+esc(m.from||"")+'</div>':'')+(m.del?'<div class="dl">🚫 This message was deleted</div>':qhtml(m)+(m.file?fileHtml(m,i):'')+(m.t?'<div>'+richText(m.t)+'</div>':''))+rxhtml(m)+'<time>'+(starred[m.id]?'⭐ ':'')+(m.ed&&!m.del?'edited · ':'')+m.time+(m.me&&!m.del?' '+tk(m.st):'')+'</time></div>';
+    h+='<div class="m'+(m.me?' me':'')+'" data-mi="'+i+'">'+(isG(cur)&&!m.me&&!m.del?'<div class="sn">'+esc(m.from||"")+'</div>':'')+(m.del?'<div class="dl">🚫 This message was deleted</div>':qhtml(m)+(m.file?fileHtml(m,i):'')+(m.t?(m.t.indexOf("::s:")===0?'<div class="stk">'+esc(m.t.slice(4))+'</div>':'<div>'+richText(m.t)+'</div>'):''))+rxhtml(m)+'<time>'+(starred[m.id]?'⭐ ':'')+(m.ed&&!m.del?'edited · ':'')+m.time+(m.me&&!m.del?' '+tk(m.st):'')+'</time></div>';
   });
   var el=$("msgs");el.innerHTML=h||'<div class="empty">No messages yet. Say hi 👋</div>';el.scrollTop=el.scrollHeight;
 }
@@ -712,6 +714,7 @@ function openChat(n){closeModal();$("app").classList.remove("community");if(pref
 function send(){
   var i=$("in"),v=i.value.trim();if(!v)return;
   if(!ws||ws.readyState!==1){status("Not connected yet. Try again in a moment.");return}
+  if(isG(cur)&&groups[cur]&&groups[cur].adminOnly&&!groups[cur].members.some(function(x){return x.n===me&&x.a})){status("Only admins can send messages in this group");return}
   var cid=++cidN;
   chat(cur).m.push({cid:cid,me:1,t:v,time:now(),st:"pending",kind:"msg",rep:replyTo&&replyTo.id});
   tx({type:"msg",to:cur,text:v,cid:cid,reply:replyTo&&replyTo.id});
@@ -825,6 +828,7 @@ function openGroup(){
   var h='<div class="sheet"><strong style="font-size:18px">'+esc(g.name)+'</strong><p class="note">'+g.members.length+' members</p>';
   g.members.forEach(function(x){h+='<div class="cen" style="justify-content:space-between"><span>'+esc(x.n)+(x.a?' <small class="note">admin</small>':'')+(x.n===me?' (you)':'')+'</span>'+(adm&&x.n!==me?'<button class="lnk" data-grm="'+esc(x.n)+'">Remove</button>':'')+'</div>'});
   if(adm)h+='<div class="row2"><input id="g_add" placeholder="Add a friend by name" autocapitalize="none"><button class="pri" id="g_addb">Add</button></div>';
+  if(adm)h+='<button class="act" id="g_only">'+(g.adminOnly?'✅ Only admins can send messages (tap to allow everyone)':'💬 Everyone can send messages (tap to limit to admins)')+'</button>';
   if(adm)h+='<label class="act" style="cursor:pointer">🖼️ Change group picture<input type="file" id="g_pic" accept="image/*" hidden></label><button class="act" id="g_inv">🔗 Invite link</button>';
   modal(h+'<button class="act dng" id="g_leave">Leave group</button><button class="lnk" id="p_close">Close</button></div>');
 }
@@ -914,6 +918,11 @@ document.addEventListener("click",function(e){
   if(t.dataset.sv){svList=(window._st||{})[t.dataset.sv]||[];svI=0;closeModal();showSv();return}
   if(t.dataset.sdel){post("/api/status/delete",{id:+t.dataset.sdel}).then(function(){$("sv").hidden=true;loadStories()});return}
   if(t.dataset.fs){applyFs(t.dataset.fs);document.querySelectorAll("button[data-fs]").forEach(function(x){x.classList.toggle("on",x===t)});return}
+  if(t.dataset.stk){
+    if(!ws||ws.readyState!==1){status("Not connected yet. Try again in a moment.");return}
+    if(isG(cur)&&groups[cur]&&groups[cur].adminOnly&&!groups[cur].members.some(function(x){return x.n===me&&x.a})){closeModal();status("Only admins can send messages in this group");return}
+    var sv="::s:"+t.dataset.stk,sc=++cidN;chat(cur).m.push({cid:sc,me:1,t:sv,time:now(),st:"pending",kind:"msg"});tx({type:"msg",to:cur,text:sv,cid:sc});closeModal();renderMsgs();renderList();return;
+  }
   if(t.dataset.theme)return setLook("theme",t.dataset.theme);
   if(t.dataset.bg)return setLook("bg",t.dataset.bg);
   var sm=chats[cur]&&chats[cur].m[selMsg];
@@ -947,6 +956,8 @@ document.addEventListener("click",function(e){
     case"del_go":{var dpw=$("del_pw").value;if(!dpw){$("del_msg").textContent="Type your password first";return}var dr=document.querySelector("input[name=dr]:checked");post("/api/delete-account",{password:dpw,reason:dr?dr.value:""}).then(function(d){if(d.error){$("del_msg").textContent=d.error;return}try{localStorage.removeItem("gz")}catch(e){}location.reload()});return}
     case"emob":$("emo").hidden=!$("emo").hidden;if(!$("emo").hidden)drawEmojiGrid();return;
     case"sms_send":return openSms();
+    case"g_only":tx({type:"gonly",id:cur,on:!(groups[cur]&&groups[cur].adminOnly)});closeModal();return;
+    case"stk_m":modal('<div class="sheet"><strong>Stickers</strong><div class="cen" style="flex-wrap:wrap">'+Array.from("😂🤣😍🥰😎🤩😭😡🥳😴🤔🙄😱🤯🥺😇👍👎👏🙌🙏💪🤝👋🔥💖💔🎉🎂🎁🌹☀️🌈⭐💯✅🍕🍔☕⚽🚗✈️🏠📞").filter(function(c){return c!=="\uFE0F"}).map(function(c){return '<button style="font-size:38px;padding:2px 4px" data-stk="'+c+'">'+c+'</button>'}).join("")+'</div><button class="lnk" id="p_close">Cancel</button></div>');return;
     case"loc_send":closeModal();return sendLoc();
     case"exp_chat":closeModal();return exportChat();
     case"act_all":if(sm)tx({type:"delete",id:sm.id,scope:"all"});closeModal();return;
@@ -959,7 +970,7 @@ document.addEventListener("click",function(e){
       if(sm&&nt&&nt!==sm.t)tx({type:"edit",id:sm.id,text:nt});
       closeModal();return;
     case"chatmenu":
-      modal('<div class="sheet"><strong>'+esc(label(cur))+'</strong><button class="act" id="pref_p">📌 '+(prefs[cur]&&prefs[cur].p?"Unpin":"Pin")+' chat</button><button class="act" id="pref_a">🗄️ '+(prefs[cur]&&prefs[cur].a?"Unarchive":"Archive")+' chat</button><button class="act" id="pref_m">🔇 '+(prefs[cur]&&prefs[cur].m?"Unmute":"Mute")+' chat</button>'+(isG(cur)?'<button class="act" id="g_info">👥 Group info and members</button>':'')+(cur==="shop"||isG(cur)?'':'<button class="act dng" id="blk">🚫 '+(blocked[cur]?"Unblock ":"Block ")+esc(cur)+'</button>')+(cur==="shop"?'':'<button class="act dng" id="rpt">🚩 Report '+esc(isG(cur)?"this group":cur)+'</button>')+'<button class="act" id="dis_m">⏳ Disappearing messages: '+({0:"Off",86400:"24 hours",604800:"7 days",7776000:"90 days"}[dis[cur]||0])+'</button>'+(isG(cur)?'':'<button class="act" id="once_m">👁 Send a view-once photo</button>')+(cur==="shop"||isG(cur)?'':'<button class="act" id="sms_send">✉️ Send an SMS using my phone plan</button><p class="note">Opens your phone’s Messages app. Your carrier may charge. Replies appear there.</p>')+'<button class="act" id="pref_u">'+(prefs[cur]&&prefs[cur].u?"✔️ Clear unread mark":"🟡 Mark as unread")+'</button><button class="act" id="loc_send">📍 Send my location</button><button class="act" id="exp_chat">⬇️ Export this chat (text file)</button><button class="act dng" id="del_chat">Delete this chat for me only</button><p class="note">The other person keeps their copy. Messages you delete here stay on their phone.</p><button class="lnk" id="p_close">Cancel</button></div>');return;
+      modal('<div class="sheet"><strong>'+esc(label(cur))+'</strong><button class="act" id="pref_p">📌 '+(prefs[cur]&&prefs[cur].p?"Unpin":"Pin")+' chat</button><button class="act" id="pref_a">🗄️ '+(prefs[cur]&&prefs[cur].a?"Unarchive":"Archive")+' chat</button><button class="act" id="pref_m">🔇 '+(prefs[cur]&&prefs[cur].m?"Unmute":"Mute")+' chat</button>'+(isG(cur)?'<button class="act" id="g_info">👥 Group info and members</button>':'')+(cur==="shop"||isG(cur)?'':'<button class="act dng" id="blk">🚫 '+(blocked[cur]?"Unblock ":"Block ")+esc(cur)+'</button>')+(cur==="shop"?'':'<button class="act dng" id="rpt">🚩 Report '+esc(isG(cur)?"this group":cur)+'</button>')+'<button class="act" id="dis_m">⏳ Disappearing messages: '+({0:"Off",86400:"24 hours",604800:"7 days",7776000:"90 days"}[dis[cur]||0])+'</button>'+(isG(cur)?'':'<button class="act" id="once_m">👁 Send a view-once photo</button>')+(cur==="shop"||isG(cur)?'':'<button class="act" id="sms_send">✉️ Send an SMS using my phone plan</button><p class="note">Opens your phone’s Messages app. Your carrier may charge. Replies appear there.</p>')+'<button class="act" id="pref_u">'+(prefs[cur]&&prefs[cur].u?"✔️ Clear unread mark":"🟡 Mark as unread")+'</button><button class="act" id="stk_m">🎭 Send a sticker</button><button class="act" id="loc_send">📍 Send my location</button><button class="act" id="exp_chat">⬇️ Export this chat (text file)</button><button class="act dng" id="del_chat">Delete this chat for me only</button><p class="note">The other person keeps their copy. Messages you delete here stay on their phone.</p><button class="lnk" id="p_close">Cancel</button></div>');return;
     case"del_chat":
       tx({type:"clear",with:cur});
       if(cur==="shop")chats.shop.m=[];else delete chats[cur];

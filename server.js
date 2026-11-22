@@ -176,6 +176,7 @@ async function setup() {
   await q("alter table chat_groups add column if not exists photo bytea");
   await q("alter table chat_groups add column if not exists photo_mime text");
   await q("alter table chat_groups add column if not exists photo_v int not null default 0");
+  await q("alter table chat_groups add column if not exists admin_only boolean not null default false");
   await q("create table if not exists group_invites(code text primary key, group_id bigint not null, created_by text not null, created timestamptz default now())");
   await q("create table if not exists status_reacts(status_id bigint not null, name text not null, emoji text not null, primary key(status_id, name))");
   await q("create table if not exists delete_reasons(id bigserial primary key, reason text not null, created timestamptz default now())");
@@ -666,6 +667,7 @@ async function handler(req, res) {
       const grp = to.startsWith("g:");
       if (grp) {
         if (!(await isMember(user, to))) return json(res, 403, { error: "You are not in this group" });
+        if (!(await canPost(user, to))) return json(res, 403, { error: "Only admins can send messages in this group" });
       } else {
         const ex = await q("select 1 from users where name=$1", [to]);
         if (!ex.rows.length) return json(res, 404, { error: "No user called " + to });
@@ -707,7 +709,7 @@ const server = http.createServer((req, res) => {
 });
 
 // ---------- Notifications ----------
-const prevText = (text, kind, file) => file ? (file.once ? "👁 Photo" : /^image\//.test(file.mime) ? "📷 Photo" : /^audio\//.test(file.mime) ? "🎤 Voice note" : "📎 " + file.name) : String(text).slice(0, 100);
+const prevText = (text, kind, file) => file ? (file.once ? "👁 Photo" : /^image\//.test(file.mime) ? "📷 Photo" : /^audio\//.test(file.mime) ? "🎤 Voice note" : "📎 " + file.name) : String(text).indexOf("::s:") === 0 ? "🎭 Sticker" : String(text).slice(0, 100);
 async function initPush() {
   if (!webpush) return;
   const r = await q("select value from kv where key='vapid'");
@@ -754,11 +756,15 @@ async function cleanup() {
 }
 
 // ---------- Groups ----------
+async function canPost(name, key) {
+  const r = await q("select g.admin_only, gm.admin from chat_groups g join group_members gm on gm.group_id=g.id and gm.name=$2 where g.id=$1", [String(key).replace("g:", ""), name]);
+  return r.rows.length > 0 && (!r.rows[0].admin_only || r.rows[0].admin);
+}
 async function groupInfo(id) {
-  const g = await q("select id, name, photo_v from chat_groups where id=$1", [id]);
+  const g = await q("select id, name, photo_v, admin_only from chat_groups where id=$1", [id]);
   if (!g.rows.length) return null;
   const m = await q("select name, admin from group_members where group_id=$1 order by admin desc, name", [id]);
-  return { key: "g:" + id, name: g.rows[0].name, pv: g.rows[0].photo_v, members: m.rows.map((x) => ({ n: x.name, a: x.admin })) };
+  return { key: "g:" + id, name: g.rows[0].name, pv: g.rows[0].photo_v, adminOnly: g.rows[0].admin_only, members: m.rows.map((x) => ({ n: x.name, a: x.admin })) };
 }
 async function pushGroup(id) {
   const g = await groupInfo(id);
@@ -899,6 +905,7 @@ wss.on("connection", (ws) => {
         if (to === name) return fail("You cannot message yourself");
         if (to.startsWith("g:")) {
           if (!(await isMember(name, to))) return fail("You are not in this group");
+          if (!(await canPost(name, to))) return fail("Only admins can send messages in this group");
           const gr = parseInt(m.reply) || null;
           const gd = await deliverGroup(name, to, text, "msg", null, null, gr);
           return send({ type: "sent", cid: m.cid, id: gd.id, to, text, kind: "msg", file: null, reply: gr, exp: gd.exp, at: gd.at, st: gd.st });
@@ -1023,7 +1030,8 @@ wss.on("connection", (ws) => {
         if (!(o.to_user.startsWith("g:") ? await isMember(name, o.to_user) : o.from_user === name || o.to_user === name)) return fail("That message cannot be forwarded");
         if (o.file_id && ((await q("select once from files where id=$1", [o.file_id])).rows[0] || {}).once) return fail("View-once photos cannot be forwarded");
         const grp = to.startsWith("g:");
-        if (grp) { if (!(await isMember(name, to))) return fail("You are not in that group"); }
+        if (grp) { if (!(await isMember(name, to))) return fail("You are not in that group");
+          if (!(await canPost(name, to))) return fail("Only admins can send messages in that group"); }
         else {
           if (to === name) return fail("Choose another chat");
           if (!(await q("select 1 from users where name=$1", [to])).rows.length) return fail("No user called " + to);
@@ -1052,6 +1060,14 @@ wss.on("connection", (ws) => {
         const gid = g.rows[0].id;
         await q("insert into group_members(group_id,name,admin) values($1,$2,true)", [gid, name]);
         for (const n of names) await q("insert into group_members(group_id,name) values($1,$2)", [gid, n]);
+        return pushGroup(gid);
+      }
+
+      if (m.type === "gonly") {
+        const gid = parseInt(String(m.id).replace("g:", ""));
+        const a = await q("select admin from group_members where group_id=$1 and name=$2", [gid, name]);
+        if (!a.rows.length || !a.rows[0].admin) return fail("Only group admins can do that");
+        await q("update chat_groups set admin_only=$1 where id=$2", [!!m.on, gid]);
         return pushGroup(gid);
       }
 
