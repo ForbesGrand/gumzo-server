@@ -147,6 +147,8 @@ async function setup() {
   await q("alter table users add column if not exists last_seen timestamptz");
   await q("create table if not exists chat_groups(id bigserial primary key, name text not null, owner text not null, created timestamptz default now())");
   await q("create table if not exists group_members(group_id bigint not null, name text not null, admin boolean not null default false, primary key(group_id, name))");
+  await q("create table if not exists stars(name text not null, msg_id bigint not null, primary key(name, msg_id))");
+  await q("create table if not exists reactions(msg_id bigint not null, name text not null, emoji text not null, primary key(msg_id, name))");
   await q("alter table users add column if not exists about text");
   await q("alter table users add column if not exists hide_seen boolean not null default false");
   await q("alter table users add column if not exists no_receipts boolean not null default false");
@@ -555,6 +557,7 @@ wss.on("connection", (ws) => {
         const unread = {};
         un.rows.forEach((x) => { unread[x.other] = x.n; });
         (await q("select m.to_user as other, count(*)::int as n from messages m join group_members gm on gm.name=$1 and ('g:'||gm.group_id)=m.to_user left join reads r on r.name=$1 and r.other=m.to_user where m.from_user<>$1 and m.deleted_at is null and not exists (select 1 from hidden hd where hd.name=$1 and hd.msg_id=m.id) and m.id>coalesce(r.last_id,0) group by m.to_user", [name])).rows.forEach((x) => { unread[x.other] = x.n; });
+        const starIds = (await q("select msg_id from stars where name=$1", [name])).rows.map((x) => Number(x.msg_id));
         const groups = {};
         for (const g of (await q("select group_id from group_members where name=$1", [name])).rows) { const gi = await groupInfo(g.group_id); if (gi) groups[gi.key] = gi; }
         const names = new Set([name, "shop"]);
@@ -570,7 +573,10 @@ wss.on("connection", (ws) => {
         const pf = {};
         (await q("select other, pinned, archived, muted from prefs where name=$1", [name])).rows.forEach((x) => { pf[x.other] = { p: x.pinned, a: x.archived, m: x.muted }; });
         const blocked = (await q("select other from blocks where name=$1", [name])).rows.map((x) => x.other);
-        return send({ type: "history", msgs, unread, profiles, prefs: pf, blocked, groups });
+        const rx = {};
+        if (msgs.length) (await q("select msg_id, name, emoji from reactions where msg_id = any($1)", [msgs.map((x) => x.id)])).rows.forEach((x) => { (rx[x.msg_id] = rx[x.msg_id] || {})[x.name] = x.emoji; });
+        msgs.forEach((x) => { x.rx = rx[x.id] || {}; });
+        return send({ type: "history", msgs, unread, profiles, prefs: pf, blocked, groups, stars: starIds });
       }
       if (!name) return fail("Join first");
 
@@ -611,6 +617,51 @@ wss.on("connection", (ws) => {
         const reply = parseInt(m.reply) || null;
         const d = await deliver(name, to, text, "msg", null, null, reply);
         return send({ type: "sent", cid: m.cid, id: d.id, to, text, kind: "msg", file: null, reply, at: d.at, st: d.st });
+      }
+
+      if (m.type === "star") {
+        const id = parseInt(m.id);
+        if (m.on) await q("insert into stars(name,msg_id) select $1,id from messages where id=$2 and (from_user=$1 or to_user=$1 or to_user in (select 'g:'||group_id from group_members where name=$1)) on conflict do nothing", [name, id]);
+        else await q("delete from stars where name=$1 and msg_id=$2", [name, id]);
+        return;
+      }
+
+      if (m.type === "react") {
+        const id = parseInt(m.id);
+        const emoji = String(m.emoji || "").slice(0, 8);
+        const r = await q("select from_user, to_user from messages where id=$1 and deleted_at is null", [id]);
+        if (!r.rows.length) return;
+        const f = r.rows[0].from_user, t = r.rows[0].to_user, grp = t.startsWith("g:");
+        if (!(grp ? await isMember(name, t) : f === name || t === name)) return;
+        if (emoji) await q("insert into reactions(msg_id,name,emoji) values($1,$2,$3) on conflict (msg_id,name) do update set emoji=excluded.emoji", [id, name, emoji]);
+        else await q("delete from reactions where msg_id=$1 and name=$2", [id, name]);
+        const targets = grp ? (await q("select name from group_members where group_id=$1", [t.slice(2)])).rows.map((x) => x.name) : [f, t];
+        targets.forEach((n) => { const u = online.get(n); if (u && u.ws.readyState === 1) u.ws.send(JSON.stringify({ type: "react", id, name, emoji, with: grp ? t : n === f ? t : f })); });
+        return;
+      }
+
+      if (m.type === "forward") {
+        const id = parseInt(m.id), to = String(m.to || "").toLowerCase();
+        const r = await q("select from_user, to_user, text, kind, file_id, deleted_at from messages where id=$1", [id]);
+        const o = r.rows[0];
+        if (!o || o.deleted_at || o.kind === "order") return fail("That message cannot be forwarded");
+        if (!(o.to_user.startsWith("g:") ? await isMember(name, o.to_user) : o.from_user === name || o.to_user === name)) return fail("That message cannot be forwarded");
+        const grp = to.startsWith("g:");
+        if (grp) { if (!(await isMember(name, to))) return fail("You are not in that group"); }
+        else {
+          if (to === name) return fail("Choose another chat");
+          if (!(await q("select 1 from users where name=$1", [to])).rows.length) return fail("No user called " + to);
+          if ((await q("select 1 from blocks where (name=$1 and other=$2) or (name=$2 and other=$1)", [name, to])).rows.length) return fail("You can't message this person");
+        }
+        let fid = null, file = null, text = o.text ? "↪️ " + o.text : "";
+        if (o.file_id) {
+          const f = await q("insert into files(owner,to_user,name,mime,size,data) select $1,$2,name,mime,size,data from files where id=$3 returning id, name, mime, size", [name, to, o.file_id]);
+          if (!f.rows.length) return fail("The file is no longer available");
+          fid = Number(f.rows[0].id); file = { id: fid, name: f.rows[0].name, mime: f.rows[0].mime, size: f.rows[0].size }; text = "";
+        }
+        const kind = o.file_id ? "file" : "msg";
+        const d = grp ? await deliverGroup(name, to, text, kind, fid, file) : await deliver(name, to, text, kind, fid, file);
+        return send({ type: "sent", id: d.id, to, text, kind, file, at: d.at, st: d.st });
       }
 
       if (m.type === "gcreate") {

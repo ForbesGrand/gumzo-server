@@ -81,6 +81,7 @@ input[type=checkbox]{width:auto}
 #emo{display:flex;flex-wrap:wrap;gap:2px;padding:6px 10px;background:var(--panel);border-top:1px solid var(--line)}#emo button{font-size:24px;padding:2px 5px}
 .m audio{display:block;width:240px;max-width:100%;margin-bottom:4px}.m a{color:inherit;text-decoration:underline}
 .sn{font-size:12px;font-weight:700;color:var(--red)}
+.rx{margin-top:3px;font-size:13px}.rx span{background:rgba(0,0,0,.07);border-radius:10px;padding:1px 6px;margin-right:4px}
 .lbl{display:inline-block;cursor:pointer;text-align:center}
 .cen{display:flex;gap:10px;justify-content:center;align-items:center}
 #lb{position:fixed;inset:0;background:#000;display:grid;place-items:center;z-index:30;cursor:zoom-out}
@@ -141,6 +142,7 @@ input[type=checkbox]{width:auto}
       <input id="srch" placeholder="Search chats" aria-label="Search chats" autocomplete="off">
       <div class="row2"><input id="nc" placeholder="Friend’s name or phone number" aria-label="Friend’s name or phone number" autocomplete="off" autocapitalize="none"><button class="pri" id="start">Chat</button></div>
       <button class="lnk" id="newg" style="text-align:left">👥 New group</button>
+      <button class="lnk" id="starl" style="text-align:left">⭐ Starred messages</button>
       <p class="note" id="status"></p>
     </div>
     <div class="list" id="list"></div>
@@ -172,7 +174,7 @@ function pj(path,obj){return fetch(path,{method:"POST",headers:{"Content-Type":"
 function fileUrl(id){return "/api/file/"+id+"?token="+token}
 function size(n){return n<1024?n+" B":n<1048576?Math.round(n/1024)+" KB":(n/1048576).toFixed(1)+" MB"}
 try{token=localStorage.getItem("gz")||""}catch(e){}
-var groups={},prefs={},blocked={},showArch=false,replyTo=null,rec=null,chunks=[],EMO=Array.from("😀😂🤣😍🥰😘😊😉😎🤔😢😭😡😴😅😇🙏👍👎👏🙌💪🤝👋👀🔥💖💔🎉✨💯✅❌🎁🙂😋😜🤗😱😬");
+var starred={},groups={},prefs={},blocked={},showArch=false,replyTo=null,rec=null,chunks=[],EMO=Array.from("😀😂🤣😍🥰😘😊😉😎🤔😢😭😡😴😅😇🙏👍👎👏🙌💪🤝👋👀🔥💖💔🎉✨💯✅❌🎁🙂😋😜🤗😱😬");
 var LOOK={theme:"red",bg:"default"},TC={red:"#D32F2F",blue:"#1976D2",yellow:"#F9A825",green:"#2E7D32"},pres={},typingUntil=0;
 function applyLook(t,b){
   if(!TC[t])t="red";if(!/^(default|red|blue|yellow|green)$/.test(b))b="default";
@@ -277,8 +279,8 @@ function handle(d){
   if(t==="joined"){me=d.name;$("join").hidden=true;$("app").hidden=false;status("Connected as "+me);renderList();renderMain();
     api("/api/me").then(function(x){if(!x||x.error)return;applyLook(x.theme,x.bg);if(me!=="shop"&&!x.phone)openProfile("Please add your phone number. Friends use it to find you, and it is how you reset a forgotten password.")}).catch(function(){});return}
   if(t==="history"){
-    chats={shop:{m:[],un:0}};prof=d.profiles||prof;prefs=d.prefs||{};groups=d.groups||{};Object.keys(groups).forEach(function(k){chat(k)});blocked={};(d.blocked||[]).forEach(function(b){blocked[b]=1});
-    (d.msgs||[]).forEach(function(x){var o=isG(x.to)?x.to:x.from===me?x.to:x.from;chat(o).m.push({from:x.from,id:x.id,me:x.from===me?1:0,t:x.text,time:hm(x.at),ts:new Date(x.at).getTime(),st:x.st,kind:x.kind,file:x.file,ed:x.edited,del:x.deleted,rep:x.reply})});
+    chats={shop:{m:[],un:0}};prof=d.profiles||prof;starred={};(d.stars||[]).forEach(function(i){starred[i]=1});prefs=d.prefs||{};groups=d.groups||{};Object.keys(groups).forEach(function(k){chat(k)});blocked={};(d.blocked||[]).forEach(function(b){blocked[b]=1});
+    (d.msgs||[]).forEach(function(x){var o=isG(x.to)?x.to:x.from===me?x.to:x.from;chat(o).m.push({rx:x.rx||{},from:x.from,id:x.id,me:x.from===me?1:0,t:x.text,time:hm(x.at),ts:new Date(x.at).getTime(),st:x.st,kind:x.kind,file:x.file,ed:x.edited,del:x.deleted,rep:x.reply})});
     Object.keys(d.unread||{}).forEach(function(k){chat(k).un=+d.unread[k]});
     if(cur){chat(cur).un=0;tx({type:"read",with:cur});if(!isG(cur))tx({type:"presence",with:cur})}
     renderList();renderMain();return;
@@ -286,6 +288,10 @@ function handle(d){
   if(t==="error"){if($("app").hidden)say(d.text);else status(d.text);return}
   if(t==="catalog"){catalog=d.products;renderShop();return}
   if(t==="typing"){if(d.from===cur&&$("st")){typingUntil=Date.now()+2000;$("st").textContent="typing…";setTimeout(showPres,2100)}return}
+  if(t==="react"){
+    chat(d.with).m.forEach(function(m){if(m.id===d.id){m.rx=m.rx||{};if(d.emoji)m.rx[d.name]=d.emoji;else delete m.rx[d.name]}});
+    if(cur===d.with)renderMsgs();return;
+  }
   if(t==="group"){groups[d.group.key]=d.group;chat(d.group.key);renderList();if(cur===d.group.key)showPres();return}
   if(t==="gleft"){delete groups[d.key];delete chats[d.key];if(cur===d.key){cur=null;$("app").classList.remove("open");renderMain()}renderList();return}
   if(t==="presence"){pres[d.name]={online:d.online,last:d.last};if(d.name===cur)showPres();return}
@@ -355,6 +361,11 @@ function fileHtml(m,i){
   }
   return '<a class="fl" href="'+u+'" download="'+esc(f.name)+'">📎 '+esc(f.name)+' <small>('+size(f.size)+')</small></a>';
 }
+function rxhtml(m){
+  var c={},k,h="";for(k in (m.rx||{}))c[m.rx[k]]=(c[m.rx[k]]||0)+1;
+  for(k in c)h+='<span>'+esc(k)+(c[k]>1?' '+c[k]:'')+'</span>';
+  return h?'<div class="rx">'+h+'</div>':'';
+}
 function qhtml(m){
   if(!m.rep)return"";var q=null;chats[cur].m.forEach(function(x){if(x.id===m.rep)q=x});
   return '<div class="qt">'+(q?esc((q.me?"You":label(cur))+": "+preview(q)):"Original message")+'</div>';
@@ -385,7 +396,7 @@ function sendLoc(){
 function renderMsgs(){
   if(!cur||!$("msgs"))return;
   var h="";chats[cur].m.forEach(function(m,i){
-    h+='<div class="m'+(m.me?' me':'')+'" data-mi="'+i+'">'+(isG(cur)&&!m.me&&!m.del?'<div class="sn">'+esc(m.from||"")+'</div>':'')+(m.del?'<div class="dl">🚫 This message was deleted</div>':qhtml(m)+(m.file?fileHtml(m,i):'')+(m.t?'<div>'+esc(m.t).replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>')+'</div>':''))+'<time>'+(m.ed&&!m.del?'edited · ':'')+m.time+(m.me&&!m.del?' '+tk(m.st):'')+'</time></div>';
+    h+='<div class="m'+(m.me?' me':'')+'" data-mi="'+i+'">'+(isG(cur)&&!m.me&&!m.del?'<div class="sn">'+esc(m.from||"")+'</div>':'')+(m.del?'<div class="dl">🚫 This message was deleted</div>':qhtml(m)+(m.file?fileHtml(m,i):'')+(m.t?'<div>'+esc(m.t).replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>')+'</div>':''))+rxhtml(m)+'<time>'+(starred[m.id]?'⭐ ':'')+(m.ed&&!m.del?'edited · ':'')+m.time+(m.me&&!m.del?' '+tk(m.st):'')+'</time></div>';
   });
   var el=$("msgs");el.innerHTML=h||'<div class="empty">No messages yet. Say hi 👋</div>';el.scrollTop=el.scrollHeight;
 }
@@ -396,7 +407,7 @@ function renderShop(){
   h+='<button class="pri" id="order">Place order</button>';
   if($("shop")){$("shop").innerHTML=h;$("shop").hidden=false}
 }
-function openChat(n){cur=n;replyTo=null;chat(n).un=0;tx({type:"read",with:n});if(!isG(n))tx({type:"presence",with:n});$("app").classList.add("open");renderList();renderMain()}
+function openChat(n){closeModal();cur=n;replyTo=null;chat(n).un=0;tx({type:"read",with:n});if(!isG(n))tx({type:"presence",with:n});$("app").classList.add("open");renderList();renderMain()}
 
 /* ---------- sending ---------- */
 function send(){
@@ -492,6 +503,10 @@ var selMsg=-1;
 function msgMenu(i){
   var m=chats[cur].m[i];if(!m||!m.id)return;selMsg=i;
   var h='<div class="sheet"><strong>Message</strong>';
+  if(!m.del){
+    h+='<div class="cen">'+["👍","❤️","😂","😮","😢","🙏"].map(function(e){return '<button style="font-size:26px" data-react="'+e+'">'+e+'</button>'}).join("")+'</div>';
+    h+='<button class="act" id="act_star">⭐ '+(starred[m.id]?"Unstar":"Star")+' message</button><button class="act" id="act_fwd">↪️ Forward</button>';
+  }
   if(!m.del&&m.me&&m.kind==="msg"&&!m.file&&Date.now()-m.ts<120000)h+='<button class="act" id="act_edit">✏️ Edit (up to 2 minutes after sending)</button>';
   if(!m.del)h+='<button class="act" id="act_reply">↩️ Reply</button>';
   h+='<button class="act" id="act_me">Delete for me only</button>';
@@ -525,8 +540,16 @@ document.addEventListener("click",function(e){
   if(t.dataset.theme)return setLook("theme",t.dataset.theme);
   if(t.dataset.bg)return setLook("bg",t.dataset.bg);
   var sm=chats[cur]&&chats[cur].m[selMsg];
+  if(t.dataset.react){if(sm){var em=t.dataset.react;tx({type:"react",id:sm.id,emoji:sm.rx&&sm.rx[me]===em?"":em})}closeModal();return}
+  if(t.dataset.fwd){if(sm){tx({type:"forward",id:sm.id,to:t.dataset.fwd});status("Forwarding…")}closeModal();return}
   switch(t.id){
     case"act_me":if(sm){tx({type:"delete",id:sm.id,scope:"me"});chats[cur].m.splice(selMsg,1)}closeModal();renderList();renderMsgs();return;
+    case"act_star":if(sm){starred[sm.id]=!starred[sm.id];tx({type:"star",id:sm.id,on:!!starred[sm.id]});renderMsgs()}closeModal();return;
+    case"act_fwd":modal('<div class="sheet"><strong>Forward to…</strong>'+Object.keys(chats).map(function(n){return '<button class="act" data-fwd="'+esc(n)+'">'+esc(label(n))+'</button>'}).join("")+'<button class="lnk" id="p_close">Cancel</button></div>');return;
+    case"starl":
+      var sh='<div class="sheet"><strong>Starred messages</strong>',cnt=0;
+      Object.keys(chats).forEach(function(n){chats[n].m.forEach(function(m){if(m.id&&starred[m.id]&&!m.del){cnt++;sh+='<button class="act" data-id="'+esc(n)+'"><b>'+esc(label(n))+'</b><br><small class="note">'+esc(preview(m))+'</small></button>'}})});
+      modal(sh+(cnt?'':'<p class="note">No starred messages yet. Tap a message and choose Star.</p>')+'<button class="lnk" id="p_close">Close</button></div>');return;
     case"act_reply":if(sm){replyTo={id:sm.id,txt:(sm.me?"You":label(cur))+": "+preview(sm)};showReply();if($("in"))$("in").focus()}closeModal();return;
     case"rb_x":replyTo=null;showReply();return;
     case"mic":return mic();
