@@ -126,6 +126,8 @@ html[data-theme=yellow] .hdr{background:linear-gradient(125deg,var(--red),color-
 .tabs button{flex:1;padding:10px 4px;font-weight:600;color:var(--mute);border-bottom:3px solid transparent}
 .tabs button.on{color:var(--red);border-color:var(--red)}
 .tb{background:var(--red);color:#fff;border-radius:9px;font-size:11px;padding:0 6px;margin-left:4px}
+.svc{position:absolute;left:0;right:0;bottom:104px;padding:10px 16px;background:linear-gradient(transparent,rgba(0,0,0,.65));text-align:center;font-size:16px;word-break:break-word}
+#sv video{width:100%;max-height:84vh;object-fit:contain}
 </style>
 </head>
 <body>
@@ -463,7 +465,7 @@ function renderTabs(){var b=$("tabs");if(!b)return;var c={all:0,personal:0,group
   var T=[["all","All"],["personal","Personal"],["groups","Groups"]];if(me!=="shop")T.push(["shop","Shop"]);
   if(me==="shop"&&tab==="shop")tab="personal";
   b.innerHTML=T.map(function(t){return '<button data-tab="'+t[0]+'" class="'+(tab===t[0]?'on':'')+'">'+t[1]+(c[t[0]]?'<span class="tb">'+c[t[0]]+'</span>':'')+'</button>'}).join("")}
-function loadStories(){if(!me)return;api("/api/statuses").then(function(d){var by={},ord=[];(d.items||[]).forEach(function(x){if(!by[x.owner]){by[x.owner]=[];ord.push(x.owner)}by[x.owner].push(x)});window._st=by;window._ord=ord;renderStories()}).catch(function(){})}
+function loadStories(){if(!me)return;api("/api/statuses").then(function(d){var by={},ord=[];(d.items||[]).forEach(function(x){if(!by[x.owner]){by[x.owner]=[];ord.push(x.owner)}x._t=Date.now();by[x.owner].push(x)});window._st=by;window._ord=ord;renderStories()}).catch(function(){})}
 function renderStories(){var b=$("stories");if(!b||!me)return;var by=window._st||{};
   var un=function(o){return by[o].some(function(x){return !x.seen})};
   var ord=(window._ord||[]).filter(function(o){return o!==me}).sort(function(a,c){return (un(c)?1:0)-(un(a)?1:0)});
@@ -531,6 +533,12 @@ document.addEventListener("click",function(e){var b=e.target.closest("button");i
   if(id==="c_end")return endCall(true,"Call ended");
   if(id==="c_mute"&&ls){ls.getAudioTracks().forEach(function(t){t.enabled=!t.enabled});b.style.opacity=ls.getAudioTracks()[0]&&ls.getAudioTracks()[0].enabled?1:.4;return}
   if(id==="c_cam"&&ls){ls.getVideoTracks().forEach(function(t){t.enabled=!t.enabled});b.style.opacity=ls.getVideoTracks()[0]&&ls.getVideoTracks()[0].enabled?1:.4;return}
+});
+document.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;
+  if(b.dataset.srx){var x=svList[svI];if(!x)return;var em=x.mine===b.dataset.srx?"":b.dataset.srx;x.mine=em;post("/api/status/react",{id:x.id,emoji:em}).catch(function(){});
+    document.querySelectorAll("[data-srx]").forEach(function(bb){bb.style.background=bb.dataset.srx===em?"rgba(255,255,255,.3)":""});return}
+  if(b.id==="svpen"){var y=svList[svI];if(!y)return;var nv=prompt("Caption",y.text||"");if(nv===null)return;
+    post("/api/status/edit",{id:y.id,caption:nv}).then(function(d){if(d.error){status(d.error);return}y.text=nv.trim().slice(0,200);showSv()}).catch(function(){status("Could not save the caption")})}
 });
 function pinBar(){var b=$("pinbar");if(!b||!cur)return;var pm=chat(cur).m.filter(function(m){return m.pn&&!m.del})[0];if(!pm){b.hidden=true;return}b.hidden=false;b.innerHTML="📌 "+esc((pm.t||(pm.file?"Attachment":"Message")).slice(0,80))}
 function renderMsgs(){pinBar();
@@ -679,8 +687,8 @@ function unpush(){
 function openStatus(){
   modal('<div class="sheet"><p class="note">Loading…</p></div>');
   api("/api/statuses").then(function(d){
-    var by={},ord=[];(d.items||[]).forEach(function(x){if(!by[x.owner]){by[x.owner]=[];ord.push(x.owner)}by[x.owner].push(x)});window._st=by;window._ord=ord;renderStories();
-    var h='<div class="sheet"><strong style="font-size:18px">Status</strong><p class="note">Posts disappear after 24 hours. People you have chatted with can see them.</p><div class="cen"><button class="pri" id="st_text">✍️ Text</button><label class="pri lbl">📷 Photo<input type="file" id="stfile" accept="image/*" hidden></label></div>';
+    var by={},ord=[];(d.items||[]).forEach(function(x){if(!by[x.owner]){by[x.owner]=[];ord.push(x.owner)}x._t=Date.now();by[x.owner].push(x)});window._st=by;window._ord=ord;renderStories();
+    var h='<div class="sheet"><strong style="font-size:18px">Status</strong><p class="note">Posts disappear after 24 hours. People you have chatted with can see them.</p><input id="st_cap" maxlength="200" placeholder="Caption for a photo or video (optional)"><div class="cen"><button class="pri" id="st_text">✍️ Text</button><label class="pri lbl">📷 Photo or video<input type="file" id="stfile" accept="image/*,video/*" hidden></label></div>';
     if(by[me])h+='<button class="act" data-sv="'+esc(me)+'">My status ('+by[me].length+') · tap to view</button>';
     ord.filter(function(o){return o!==me}).forEach(function(o){var un=by[o].some(function(x){return !x.seen});h+='<button class="act" data-sv="'+esc(o)+'">'+(un?'🔴 ':'')+'<span style="'+(un?'font-weight:700':'')+'">'+esc(label(o))+'</span> · '+by[o].length+'</button>'});
     if(!ord.length)h+='<p class="note">No status updates yet.</p>';
@@ -688,15 +696,27 @@ function openStatus(){
   }).catch(function(){closeModal();status("Could not load status")});
 }
 function postPhoto(f){
-  if(!f)return;pmsg("Posting…");
-  shrink(f,1280,.8,false).then(function(b){return fetch("/api/status",{method:"POST",headers:hdrs({"Content-Type":"image/jpeg"}),body:b}).then(function(r){return r.json()})})
-  .then(function(d){if(d.error){pmsg(d.error);return}openStatus()}).catch(function(){pmsg("Could not post that photo")});
+  if(!f)return;var cap=($("st_cap")&&$("st_cap").value||"").trim().slice(0,200),vid=/^video\//.test(f.type);
+  if(vid&&f.size>8*1024*1024){pmsg("That video is too big. Choose one under 8 MB (about 20 seconds).");return}
+  pmsg("Posting…");
+  var go=function(b,ct){return fetch("/api/status",{method:"POST",headers:hdrs({"Content-Type":ct,"X-Caption":encodeURIComponent(cap)}),body:b}).then(function(r){return r.json()})};
+  (vid?go(f,f.type):shrink(f,1280,.8,false).then(function(b){return go(b,"image/jpeg")}))
+  .then(function(d){if(d.error){pmsg(d.error);return}openStatus();loadStories()}).catch(function(){pmsg("Could not post that")});
 }
 function showSv(){
-  var x=svList[svI];if(!x){$("sv").hidden=true;return}
-  var body=x.kind==="text"?'<div class="svt">'+esc(x.text)+'</div>':'<img src="'+fileUrl(x.file)+'" alt="Status photo">';
-  var foot=x.owner===me?'<div class="svf">👁 '+(x.views||[]).length+((x.views||[]).length?' · '+esc(x.views.join(", ")):'')+' <button class="lnk" data-sdel="'+x.id+'" style="color:#fff">Delete</button></div>':'<div class="svf">'+esc(label(x.owner))+' · '+hm(x.at)+'</div>';
-  $("sv").style.background=x.kind==="text"?x.bg:"#000";$("sv").innerHTML=body+foot+'<button class="svx" id="svx" aria-label="Close">✕</button>';$("sv").hidden=false;
+  clearTimeout(window._pen);
+  var x=svList[svI];if(!x){$("sv").hidden=true;$("sv").innerHTML="";return}
+  var media=x.kind==="image"||x.kind==="video";
+  var body=x.kind==="text"?'<div class="svt">'+esc(x.text)+'</div>':x.kind==="video"?'<video src="'+fileUrl(x.file)+'" autoplay playsinline></video>':'<img src="'+fileUrl(x.file)+'" alt="Status photo">';
+  var cap=media&&x.text?'<div class="svc">'+esc(x.text)+'</div>':'';
+  var rem=300-(x.age||0)-(Date.now()-(x._t||Date.now()))/1000;
+  var pen=x.owner===me&&media&&rem>0?'<button class="svx" id="svpen" aria-label="Edit caption" style="right:64px">✏️</button>':'';
+  var foot;
+  if(x.owner===me){var rx=(x.rx||[]).map(function(r){return r.e+" "+esc(r.n)}).join(" · ");
+    foot='<div class="svf">👁 '+(x.views||[]).length+((x.views||[]).length?' · '+esc(x.views.join(", ")):'')+(rx?'<br>'+rx:'')+' <button class="lnk" data-sdel="'+x.id+'" style="color:#fff">Delete</button></div>'}
+  else foot='<div class="svf">'+esc(label(x.owner))+' · '+hm(x.at)+'<div style="margin-top:6px">'+["👍","❤️","😂","😮","😢","🙏"].map(function(e){return '<button data-srx="'+e+'" style="font-size:24px;padding:2px 6px;border-radius:8px;'+(x.mine===e?'background:rgba(255,255,255,.3)':'')+'">'+e+'</button>'}).join("")+'</div></div>';
+  $("sv").style.background=x.kind==="text"?x.bg:"#000";$("sv").innerHTML=body+cap+foot+pen+'<button class="svx" id="svx" aria-label="Close">✕</button>';$("sv").hidden=false;
+  if(pen)window._pen=setTimeout(function(){var p=$("svpen");if(p)p.remove()},rem*1000+50);
   if(x.owner!==me&&!x.seen){x.seen=true;renderStories();post("/api/status/view",{id:x.id}).catch(function(){})}
 }
 function openCard(n){
@@ -748,9 +768,8 @@ document.addEventListener("click",function(e){
       if(k==="a"||k==="u"){cur=null;$("app").classList.remove("open");renderMain()}renderList();return;
     case"rpt":{var why=prompt("Why are you reporting this? (spam, abuse, scam, other)");if(why&&why.trim()){tx({type:"report",who:cur,reason:why.trim()});status("Report sent. Thank you.")}closeModal();return}
     case"blk":blocked[cur]=!blocked[cur];tx({type:"block",with:cur,on:!!blocked[cur]});closeModal();status(blocked[cur]?"Blocked "+cur:"Unblocked "+cur);return;
-    case"del_acc":
-      var pw=prompt("Type your password to delete your account for good. This cannot be undone.");if(!pw)return;
-      post("/api/delete-account",{password:pw}).then(function(d){if(d.error){pmsg(d.error);return}try{localStorage.removeItem("gz")}catch(e){}location.reload()});return;
+    case"del_acc":modal('<div class="sheet"><strong style="font-size:18px">Delete your account?</strong><p class="note">Your messages, photos and profile will be deleted for good. This cannot be undone.</p><p class="note"><b>Why are you leaving?</b> (optional)</p><label class="act"><input type="radio" name="dr" value="Using another app"> I use another app</label><label class="act"><input type="radio" name="dr" value="Privacy worries"> I am worried about my privacy</label><label class="act"><input type="radio" name="dr" value="Do not use it enough"> I do not use it enough</label><input id="del_pw" type="password" placeholder="Type your password to confirm" autocomplete="current-password"><p class="note" id="del_msg"></p><button class="pri" id="del_go" style="background:#C62828;color:#fff">Delete my account forever</button><button class="lnk" id="p_close">Cancel</button></div>');return;
+    case"del_go":{var dpw=$("del_pw").value;if(!dpw){$("del_msg").textContent="Type your password first";return}var dr=document.querySelector("input[name=dr]:checked");post("/api/delete-account",{password:dpw,reason:dr?dr.value:""}).then(function(d){if(d.error){$("del_msg").textContent=d.error;return}try{localStorage.removeItem("gz")}catch(e){}location.reload()});return}
     case"emob":$("emo").hidden=!$("emo").hidden;return;
     case"loc_send":closeModal();return sendLoc();
     case"exp_chat":closeModal();return exportChat();
@@ -777,7 +796,8 @@ document.addEventListener("click",function(e){
     case"back_login1":case"back_login2":case"back_login3":return pane("login");
     case"forgot":return doForgot();
     case"reset":return doReset();
-    case"logout":unpush().then(function(){return fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:token})})}).then(function(){try{localStorage.removeItem("gz")}catch(e){}location.reload()});return;
+    case"logout":modal('<div class="sheet"><strong style="font-size:18px">Log out?</strong><p class="note">You will need your name and password to log in again.</p><button class="pri" id="do_logout">Log out</button><button class="lnk" id="p_close">Cancel</button></div>');return;
+    case"do_logout":unpush().then(function(){return fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:token})})}).then(function(){try{localStorage.removeItem("gz")}catch(e){}location.reload()});return;
     case"push_on":return enablePush();
     case"statb":return openStatus();
     case"st_text":stBg="#D32F2F";modal('<div class="sheet"><strong>Text status</strong><textarea id="st_in" maxlength="300" rows="4" placeholder="What is on your mind?" style="width:100%;padding:10px;border-radius:14px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit"></textarea><div class="sws">'+["#D32F2F","#1976D2","#2E7D32","#F57F17","#6A1B9A"].map(function(c){return '<button class="chip" data-sbg="'+c+'"><i style="background:'+c+'"></i></button>'}).join("")+'</div><button class="pri" id="st_post">Post for 24 hours</button><button class="lnk" id="p_close">Cancel</button></div>');return;

@@ -174,6 +174,8 @@ async function setup() {
   await q("alter table chat_groups add column if not exists photo_mime text");
   await q("alter table chat_groups add column if not exists photo_v int not null default 0");
   await q("create table if not exists group_invites(code text primary key, group_id bigint not null, created_by text not null, created timestamptz default now())");
+  await q("create table if not exists status_reacts(status_id bigint not null, name text not null, emoji text not null, primary key(status_id, name))");
+  await q("create table if not exists delete_reasons(id bigserial primary key, reason text not null, created timestamptz default now())");
   await q("create table if not exists status_views(status_id bigint not null, viewer text not null, primary key(status_id, viewer))");
   await q("alter table messages add column if not exists expires_at timestamptz");
   await q("create table if not exists disappear(a text not null, b text not null default '', secs int not null, primary key(a, b))");
@@ -398,7 +400,8 @@ async function handler(req, res) {
       const mine = r.rows.filter((x) => x.owner === user).map((x) => x.id);
       const vv = {};
       if (mine.length) (await q("select status_id, viewer from status_views where status_id = any($1)", [mine])).rows.forEach((x) => { (vv[x.status_id] = vv[x.status_id] || []).push(x.viewer); });
-      return json(res, 200, { items: r.rows.map((x) => ({ id: Number(x.id), owner: x.owner, kind: x.kind, text: x.text, bg: x.bg, file: x.file_id ? Number(x.file_id) : null, at: x.created, seen: x.seen || x.owner === user, views: x.owner === user ? vv[x.id] || [] : undefined })) });
+      const rxs = r.rows.length ? (await q("select status_id, name, emoji from status_reacts where status_id = any($1)", [r.rows.map((x) => x.id)])).rows : [];
+      return json(res, 200, { items: r.rows.map((x) => { const mr = rxs.filter((y) => String(y.status_id) === String(x.id)); return { id: Number(x.id), owner: x.owner, kind: x.kind, text: x.text, bg: x.bg, file: x.file_id ? Number(x.file_id) : null, at: x.created, age: Math.round((Date.now() - new Date(x.created).getTime()) / 1000), seen: x.seen || x.owner === user, views: x.owner === user ? vv[x.id] || [] : undefined, rx: x.owner === user ? mr.map((y) => ({ n: y.name, e: y.emoji })) : undefined, mine: x.owner === user ? undefined : ((mr.find((y) => y.name === user) || {}).emoji || "") }; }) });
     }
     if (req.method === "POST" && p === "/api/status") {
       const ct = String(req.headers["content-type"] || "").split(";")[0].toLowerCase();
@@ -410,11 +413,30 @@ async function handler(req, res) {
         await q("insert into statuses(owner,kind,text,bg,expires_at) values($1,'text',$2,$3,now()+interval '24 hours')", [user, text, bg]);
         return json(res, 200, { ok: true });
       }
-      if (!ct.startsWith("image/")) return json(res, 400, { error: "Please choose a photo" });
+      const isVid = ["video/mp4", "video/webm", "video/quicktime"].includes(ct);
+      if (!ct.startsWith("image/") && !isVid) return json(res, 400, { error: "Please choose a photo or a short video" });
+      let cap = "";
+      try { cap = decodeURIComponent(String(req.headers["x-caption"] || "")).trim().slice(0, 200); } catch (e) {}
       const buf = await readRaw(req, MAX_FILE);
-      if (!buf || !buf.length) return json(res, 413, { error: "Photo is too big" });
+      if (!buf || !buf.length) return json(res, 413, { error: "That file is too big (8 MB at most)" });
       const f = await q("insert into files(owner,to_user,name,mime,size,data) values($1,'status','status',$2,$3,$4) returning id", [user, ct, buf.length, buf]);
-      await q("insert into statuses(owner,kind,text,bg,file_id,expires_at) values($1,'image','','#000000',$2,now()+interval '24 hours')", [user, f.rows[0].id]);
+      await q("insert into statuses(owner,kind,text,bg,file_id,expires_at) values($1,$2,$3,'#000000',$4,now()+interval '24 hours')", [user, isVid ? "video" : "image", cap, f.rows[0].id]);
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === "POST" && p === "/api/status/edit") {
+      const b = await readBody(req);
+      const cap = String(b.caption || "").trim().slice(0, 200);
+      const r = await q("update statuses set text=$3 where id=$1 and owner=$2 and kind in ('image','video') and created > now() - interval '5 minutes' and expires_at > now() returning id", [parseInt(b.id), user, cap]);
+      if (!r.rows.length) return json(res, 403, { error: "The caption can't be changed any more" });
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === "POST" && p === "/api/status/react") {
+      const b = await readBody(req);
+      const id = parseInt(b.id), emoji = String(b.emoji || "").slice(0, 8);
+      const ok = await q("select 1 from statuses s where s.id=$1 and s.owner<>$2 and s.expires_at > now() and exists(select 1 from status_views v where v.status_id=s.id and v.viewer=$2)", [id, user]);
+      if (!ok.rows.length) return json(res, 403, { error: "You can't react to this" });
+      if (emoji) await q("insert into status_reacts(status_id,name,emoji) values($1,$2,$3) on conflict (status_id,name) do update set emoji=excluded.emoji", [id, user, emoji]);
+      else await q("delete from status_reacts where status_id=$1 and name=$2", [id, user]);
       return json(res, 200, { ok: true });
     }
     if (req.method === "POST" && p === "/api/status/view") {
@@ -425,6 +447,7 @@ async function handler(req, res) {
     if (req.method === "POST" && p === "/api/status/delete") {
       const b = await readBody(req);
       const r = await q("delete from statuses where id=$1 and owner=$2 returning file_id", [parseInt(b.id), user]);
+      if (r.rows[0]) await q("delete from status_reacts where status_id=$1", [parseInt(b.id)]);
       if (r.rows[0] && r.rows[0].file_id) await q("delete from files where id=$1", [r.rows[0].file_id]);
       return json(res, 200, { ok: true });
     }
@@ -489,6 +512,8 @@ async function handler(req, res) {
       if (user === "shop") return json(res, 400, { error: "The shop account cannot be deleted" });
       const r = await q("select hash from users where name=$1", [user]);
       if (!r.rows.length || !check(String(b.password || ""), r.rows[0].hash)) return json(res, 401, { error: "Wrong password" });
+      const why = String(b.reason || "");
+      if (["Using another app", "Privacy worries", "Do not use it enough"].includes(why)) await q("insert into delete_reasons(reason) values($1)", [why]);
       for (const sql of ["delete from files where owner=$1 or to_user=$1", "delete from messages where from_user=$1 or to_user=$1", "delete from sessions where name=$1", "delete from resets where name=$1", "delete from hidden where name=$1", "delete from cleared where name=$1 or other=$1", "delete from reads where name=$1 or other=$1", "delete from prefs where name=$1 or other=$1", "delete from blocks where name=$1 or other=$1", "delete from status_views where viewer=$1", "delete from statuses where owner=$1", "delete from push_subs where name=$1", "delete from users where name=$1"]) await q(sql, [user]);
       const u = online.get(user);
       if (u) { online.delete(user); try { u.ws.close(); } catch (e) {} }
