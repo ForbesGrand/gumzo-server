@@ -1,11 +1,19 @@
-Gumzo update: Gold theme + carrier SMS
+Gumzo update: Community Board + Emoji picker
 
-Files
-- index.html: updated app interface and carrier SMS option
-- server.js: latest server file from the supplied ZIP (unchanged)
+Replace these two files in the Gumzo GitHub project:
+- index.html
+- server.js
 
-What SMS does
-In a one-to-one chat, open the three-dot menu and choose “Send an SMS using my phone plan.” Gumzo opens the phone's normal Messages app with the contact and any typed draft filled in. The user still taps Send. This uses the phone carrier's SMS service and may use an SMS bundle or cost normal SMS credit. It does not need internet to send that SMS, but both people need phone service and a working phone number. SMS replies appear in the phone's Messages app, not inside Gumzo. Group and shop chats do not have this option.
+Keep your existing package.json, manifest.json, service worker, and other project files. The new Board tables are created automatically when the server starts; they use the same PostgreSQL database as the app.
 
-To publish
-Upload index.html and server.js to the same GitHub repository used by the Gumzo server, replacing the old files, then let the hosting service redeploy. The server.js file is included for convenience but was not changed for this feature. Keep your repository's existing package.json, manifest.json, and other files.
+Community Board
+- Open Board from the app's top bar.
+- Posts are text-only and up to 500 characters, with an area and a post type: Announcement, Event, For sale, or Help.
+- Posts are visible to signed-in Gumzo users. You can filter by area; leave the filter blank to see all areas.
+- You can chat with the author, remove your own post, or report someone else's post.
+- The app shows recent posts from the last 90 days, with up to 100 posts per request. Each account can post up to 10 times per hour.
+
+Emojis
+- Open the smiley button in a chat to browse emoji categories or search common emoji names.
+- The picker uses the phone's built-in color emoji and briefly animates the emoji when selected. Emoji appearance varies a little by phone.
+- Message reactions include more choices too.

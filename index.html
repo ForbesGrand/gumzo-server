@@ -140,6 +140,10 @@ input,select,textarea{background:#FFF9E8!important;color:#382900!important;borde
 .act.dng,#err,.mn,.tk.r,.tabs button.on{color:#805B00!important}
 #sv,#lb{background:#9A7419!important;color:#FFF9E8!important}
 .sc .rg{background:conic-gradient(#D4A017,#F5DF9A,#D4A017)!important}
+.app.community .side{display:none}.app.community .main{display:flex!important;grid-column:1/-1;background-image:none;overflow:auto}
+.boardview{width:min(100%,900px);margin:0 auto;padding:14px;display:flex;flex-direction:column;gap:12px;overflow:auto}.boardhead{display:flex;align-items:center;gap:10px}.boardhead strong{display:block;font-size:20px}.boardhead small{color:var(--mute)}.boardhead .grow{min-width:0}.boardtoolbar,.boardactions{display:flex;gap:8px;align-items:center}.boardtoolbar input{flex:1}.boardcompose,.boardcard{background:#FFF3C4;border:1px solid #E7CC78;border-radius:18px;padding:14px}.boardcompose{display:flex;flex-direction:column;gap:9px}.boardcompose textarea{width:100%;min-height:82px;resize:vertical}.boardcompose .boardrow{display:flex;gap:8px}.boardrow input,.boardrow select{flex:1;min-width:0}.boardfeed{display:flex;flex-direction:column;gap:10px}.boardcardhead{display:flex;align-items:center;gap:8px}.boardcardhead .av{width:38px;height:38px}.boardcardhead small{display:block;color:#806A34}.boardbody{white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0}.boardtype{display:inline-block;background:#F5DF9A;border-radius:12px;padding:3px 8px;font-size:12px;font-weight:700;color:#5F4500}.boardactions{justify-content:flex-end}.boardactions button{padding:7px 10px;border-radius:12px;background:#F5DF9A;color:#382900}.boardempty{text-align:center;padding:20px;color:#806A34}
+html,button,input,textarea{font-family:system-ui,-apple-system,"Segoe UI","Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+#emo{display:flex;flex-direction:column;gap:8px;max-height:300px;overflow:hidden}#emojiSearch{flex:none}#emojiCats{display:flex;gap:6px;overflow-x:auto;flex:none;padding:2px 0}.emocat{padding:6px 9px;border-radius:12px;background:#FFF9E8;color:#725100;white-space:nowrap}.emocat.on{background:#D4A017;font-weight:700}#emojiGrid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px;overflow:auto;overscroll-behavior:contain}.emojiBtn{font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;font-size:26px;padding:5px 2px;border-radius:12px;transition:transform .12s,background .12s}.emojiBtn:hover{background:#F5DF9A;transform:scale(1.16)}.emoji-pop{animation:emojiPop .36s ease}@keyframes emojiPop{0%{transform:scale(1)}45%{transform:scale(1.55) rotate(-8deg)}75%{transform:scale(.9) rotate(5deg)}100%{transform:scale(1)}}
 [style*="#D32F2F"],[style*="#C62828"],[style*="#2E7D32"],[style*="#1976D2"],[style*="#F57F17"],[style*="#6A1B9A"],[data-sbg] i{background-color:#D4A017!important;color:#382900!important}
 </style>
 </head>
@@ -188,6 +192,7 @@ input,select,textarea{background:#FFF9E8!important;color:#382900!important;borde
     <div class="hdr">
       <button class="who" id="meav" aria-label="My profile"></button>
       <h2 class="grow">Gumzo</h2>
+      <button class="light" id="board_open" aria-label="Open Community Board">Board</button>
       <button class="light" id="hmenu" aria-label="Menu">⋮</button>
           </div>
     <div class="stories" id="stories"></div>
@@ -228,7 +233,21 @@ function pj(path,obj){return fetch(path,{method:"POST",headers:{"Content-Type":"
 function fileUrl(id){return "/api/file/"+id+"?token="+token}
 function size(n){return n<1024?n+" B":n<1048576?Math.round(n/1024)+" KB":(n/1048576).toFixed(1)+" MB"}
 try{token=localStorage.getItem("gz")||""}catch(e){}
-var svList=[],svI=0,stBg="#D4A017",dis={},onceNext=false,starred={},groups={},prefs={},blocked={},showArch=false,replyTo=null,rec=null,chunks=[],EMO=Array.from("😀😂🤣😍🥰😘😊😉😎🤔😢😭😡😴😅😇🙏👍👎👏🙌💪🤝👋👀🔥💖💔🎉✨💯✅❌🎁🙂😋😜🤗😱😬");
+var svList=[],svI=0,stBg="#D4A017",dis={},onceNext=false,starred={},groups={},prefs={},blocked={},showArch=false,replyTo=null,rec=null,chunks=[];
+var EMOJIS={
+  "Faces":"😀 😃 😄 😁 😆 😅 😂 🤣 🥲 ☺️ 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🥸 🤩 🥳 😏 😒 😞 😔 😟 😕 🙁 ☹️ 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🤗 🤔 🫣 🤭 🫢 🫡 🤫 🤥 😶 😶‍🌫️ 😐 😑 😬 🫠 🙄 😯 😦 😧 😮 😲 🥱 😴 🤤 😪 😵 😵‍💫 🤐 🥴 🤢 🤮 🤧 😷 🤒 🤕 🤑 🤠 😈 👿 👹 👺 🤡 💩 👻 💀 ☠️ 👽 👾 🤖 🎃",
+  "People":"👶 🧒 👦 👧 🧑 👨 👩 🧔 👱 👨‍🦰 👩‍🦰 👨‍🦱 👩‍🦱 👨‍🦳 👩‍🦳 👨‍🦲 👩‍🦲 🧓 👴 👵 🙍 🙎 🙅 🙆 💁 🙋 🧏 🙇 🤦 🤷 👮 🕵️ 💂 🥷 👷 🫅 🤴 👸 👳 👲 🧕 🤵 👰 🤰 🫃 🫄 🤱 👼 🎅 🤶 🧑‍🎄 🦸 🦹 🧙 🧚 🧛 🧜 🧝 🧞 🧟 💆 💇 🚶 🧍 🧎 🏃 💃 🕺 🕴️ 👯 🧖 🧗 🤺 🏇 ⛷️ 🏂 🏌️ 🏄 🚣 🏊 ⛹️ 🏋️ 🚴 🚵 🤸 🤼 🤽 🤾 🤹 🧘 🛀 🛌 🧑‍⚕️ 🧑‍🎓 🧑‍🏫 🧑‍⚖️ 🧑‍🌾 🧑‍🍳 🧑‍🔧 🧑‍🏭 🧑‍💼 🧑‍🔬 🧑‍💻 🧑‍🎤 🧑‍🎨 🧑‍✈️ 🧑‍🚀 🧑‍🚒 👣 🫂",
+  "Hands":"👋 🤚 🖐️ ✋ 🖖 🫱 🫲 🫳 🫴 🫷 🫸 👌 🤌 🤏 ✌️ 🤞 🫰 🤟 🤘 🤙 👈 👉 👆 🖕 👇 ☝️ 🫵 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 🫶 👐 🤲 🤝 🙏 ✍️ 💅 🤳 💪 🦾 🦿 🦵 🦶 👂 🦻 👃 🧠 🫀 🫁 🦷 🦴 👀 👁️ 👅 👄 🫦",
+  "Animals":"🐵 🐒 🦍 🦧 🐶 🐕 🦮 🐕‍🦺 🐩 🐺 🦊 🦝 🐱 🐈 🐈‍⬛ 🦁 🐯 🐅 🐆 🐴 🫎 🫏 🐎 🦄 🦓 🦌 🦬 🐮 🐂 🐃 🐄 🐷 🐖 🐗 🐽 🐏 🐑 🐐 🐪 🐫 🦙 🦒 🐘 🦣 🦏 🦛 🐭 🐁 🐀 🐹 🐰 🐇 🐿️ 🦫 🦔 🦇 🐻 🐻‍❄️ 🐨 🐼 🦥 🦦 🦨 🦘 🦡 🐾 🦃 🐔 🐓 🐣 🐤 🐥 🐦 🐧 🕊️ 🦅 🦆 🦢 🦉 🦤 🪶 🦩 🦚 🦜 🪽 🐸 🐊 🐢 🦎 🐍 🐲 🐉 🦕 🦖 🐳 🐋 🐬 🦭 🐟 🐠 🐡 🦈 🐙 🐚 🪸 🪼 🦀 🦞 🦐 🦑 🦪 🐌 🦋 🐛 🐜 🐝 🪲 🐞 🦗 🪳 🕷️ 🕸️ 🦂 🦟 🪰 🪱 🦠",
+  "Food":"🍏 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈 🍒 🍑 🥭 🍍 🥥 🥝 🍅 🫒 🥑 🍆 🥔 🥕 🌽 🌶️ 🫑 🥒 🥬 🥦 🧄 🧅 🍄 🥜 🫘 🌰 🍞 🥐 🥖 🫓 🥨 🥯 🥞 🧇 🧀 🍖 🍗 🥩 🥓 🍔 🍟 🍕 🌭 🥪 🌮 🌯 🫔 🥙 🧆 🥚 🍳 🥘 🍲 🫕 🥣 🥗 🍿 🧈 🧂 🥫 🍱 🍘 🍙 🍚 🍛 🍜 🍝 🍠 🍢 🍣 🍤 🍥 🥮 🍡 🥟 🥠 🥡 🦪 🍦 🍧 🍨 🍩 🍪 🎂 🍰 🧁 🥧 🍫 🍬 🍭 🍮 🍯 🍼 🥛 ☕ 🫖 🍵 🍶 🍺 🍻 🥂 🍷 🥃 🍸 🍹 🧉 🧊 🥤 🧋 🧃 🧂",
+  "Travel":"🚗 🚕 🚙 🚌 🚎 🏎️ 🚓 🚑 🚒 🚐 🛻 🚚 🚛 🚜 🦽 🦼 🛴 🚲 🛵 🏍️ 🛺 🚨 🚔 🚍 🚘 🚖 🚡 🚠 🚟 🚃 🚋 🚞 🚝 🚄 🚅 🚈 🚂 🚆 🚇 🚊 🚉 ✈️ 🛫 🛬 🛩️ 💺 🛰️ 🚀 🛸 🚁 🛶 ⛵ 🚤 🛥️ 🛳️ ⛴️ 🚢 ⚓ 🛟 🪝 ⛽ 🚧 🚦 🚥 🗺️ 🗿 🗽 🗼 🏰 🏯 🏟️ 🎡 🎢 🎠 ⛲ ⛱️ 🏖️ 🏝️ 🏜️ 🌋 ⛰️ 🏔️ 🗻 🏕️ ⛺ 🛖 🏠 🏡 🏘️ 🏚️ 🏗️ 🏭 🏢 🏬 🏣 🏤 🏥 🏦 🏨 🏪 🏫 🏩 💒 🏛️ ⛪ 🕌 🛕 🕍 ⛩️ 🕋 🌅 🌄 🌇 🌆 🌃 🌉 🌌 🌠 🎑",
+  "Activities":"⚽ 🏀 🏈 ⚾ 🥎 🎾 🏐 🏉 🥏 🎱 🪀 🏓 🏸 🏒 🏑 🥍 🏏 🏹 🎣 🥊 🥋 🥅 ⛳ 🪁 🏆 🥇 🥈 🥉 🏅 🎖️ 🏵️ 🎗️ 🎫 🎟️ 🎪 🤹 🎭 🩰 🎨 🎬 🎤 🎧 🎼 🎹 🥁 🪘 🪇 🎷 🎺 🪗 🎸 🪕 🎻 🪈 🎲 ♟️ 🎯 🎳 🎮 🕹️ 🎰 🧩 🪅 🪩 🎊 🎉 🎈 🎂 🎁 🎄 🎃 🎆 🎇 🧨 ✨ 🎋 🎍 🎎 🎏 🎐 🎀 🎑",
+  "Objects":"⌚ 📱 📲 💻 🖥️ 🖨️ ⌨️ 🖱️ 🖲️ 💽 💾 💿 📀 🧮 🎥 🎞️ 📽️ 🎬 📺 📷 📸 📹 📼 🔍 🔎 💡 🔦 🏮 🪔 📔 📕 📖 📗 📘 📙 📚 📓 📒 📃 📜 📄 📰 🗞️ 📑 🔖 🏷️ 💰 🪙 💴 💵 💶 💷 💸 💳 🧾 💹 ✉️ 📧 📨 📩 📤 📥 📦 📫 📪 📬 📭 📮 🗳️ ✏️ ✒️ 🖋️ 🖊️ 🖌️ 🖍️ 📝 💼 📁 📂 🗂️ 📅 📆 🗒️ 🗓️ 📇 📈 📉 📊 📋 📌 📍 📎 🖇️ 📏 📐 ✂️ 🗃️ 🗄️ 🗑️ 🔒 🔓 🔏 🔐 🔑 🗝️ 🔨 🪓 ⛏️ ⚒️ 🛠️ 🗡️ ⚔️ 💣 🪃 🏹 🛡️ 🔧 🪛 🔩 ⚙️ 🗜️ ⚖️ 🦯 🔗 ⛓️ 🪝 🧰 🧲 🪜 🧪 🧫 🧬 🔬 🔭 📡 💉 🩸 💊 🩹 🩺 🚪 🛏️ 🛋️ 🪑 🚽 🚿 🛁 🪥 🧴 🧻 🧼 🧽 🧹 🧺 🪣 🧯 🛒 🚬 ⚰️ 🪦 ⚱️ 🧿 🪬",
+  "Nature":"🌍 🌎 🌏 🌐 🗺️ 🧭 🏔️ 🌋 🗻 🏕️ 🏖️ 🏜️ 🏝️ 🏞️ 🌅 🌄 🌠 🎇 🎆 🌇 🌆 🌃 🌌 🌉 🌁 ☀️ 🌤️ ⛅ 🌥️ 🌦️ 🌧️ ⛈️ 🌩️ 🌨️ ❄️ ☃️ ⛄ 🌬️ 💨 🌪️ 🌫️ 🌈 ☔ ⚡ ☂️ ☃️ ☄️ 🔥 💧 🌊 🌱 🌿 ☘️ 🍀 🎍 🪴 🌵 🌴 🌳 🌲 🪵 🌾 🌷 🌹 🥀 🪻 🪷 🌺 🌸 🌼 🌻 🌞 🌝 🌛 🌜 🌚 🌕 🌖 🌗 🌘 🌑 🌒 🌓 🌔 🌙 ⭐ 🌟 💫 ✨ 🌠 ☁️ 🌫️ 🌬️",
+  "Symbols":"❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 🩷 🩵 🩶 💔 ❤️‍🔥 ❤️‍🩹 ❣️ 💕 💞 💓 💗 💖 💘 💝 💟 ☮️ ✝️ ☪️ 🕉️ ☸️ ✡️ 🔯 🕎 ☯️ ☦️ 🛐 ⛎ ♈ ♉ ♊ ♋ ♌ ♍ ♎ ♏ ♐ ♑ ♒ ♓ 🆔 ⚛️ 🉑 ☢️ ☣️ 📴 📳 🈶 🈚 🈸 🈺 🈷️ ✴️ 🆚 💮 🉐 ㊙️ ㊗️ 🈴 🈵 🈹 🈲 🅰️ 🅱️ 🆎 🆑 🅾️ 🆘 ❌ ⭕ 🛑 ⛔ 📛 🚫 💯 💢 ♨️ 🚷 🚯 🚳 🚱 🔞 📵 🚭 ❗ ❕ ❓ ❔ ‼️ ⁉️ 🔅 🔆 🔱 ⚜️ 🔰 ♻️ ✅ 🈯 💹 ❇️ ✳️ ❎ 🌐 💠 🌀 ➿ 🌪️ 💤 🎵 🎶 🔔 🔕 📣 📢 👁️‍🗨️ 💬 💭 🗯️ ♠️ ♥️ ♦️ ♣️ 🃏 🎴 🀄 🔇 🔈 🔉 🔊 📶 📡 🔋 🪫 🔌 💻 🛜",
+  "Flags":"🏁 🚩 🎌 🏴 🏳️ 🏳️‍🌈 🏳️‍⚧️ 🏴‍☠️ 🇺🇬 🇰🇪 🇹🇿 🇷🇼 🇧🇮 🇸🇸 🇪🇹 🇳🇬 🇬🇭 🇿🇦 🇿🇲 🇿🇼 🇲🇼 🇲🇿 🇧🇼 🇳🇦 🇸🇿 🇱🇸 🇨🇩 🇨🇬 🇸🇳 🇨🇮 🇨🇲 🇸🇴 🇸🇩 🇪🇬 🇲🇦 🇩🇿 🇹🇳 🇱🇾 🇦🇴 🇲🇬 🇲🇺 🇸🇨 🇨🇦 🇺🇸 🇲🇽 🇧🇷 🇦🇷 🇨🇱 🇨🇴 🇵🇪 🇬🇧 🇮🇪 🇫🇷 🇩🇪 🇪🇸 🇮🇹 🇵🇹 🇳🇱 🇧🇪 🇨🇭 🇸🇪 🇳🇴 🇩🇰 🇫🇮 🇵🇱 🇺🇦 🇷🇺 🇹🇷 🇸🇦 🇦🇪 🇮🇳 🇵🇰 🇧🇩 🇨🇳 🇯🇵 🇰🇷 🇹🇭 🇮🇩 🇵🇭 🇦🇺 🇳🇿"
+};
+var emojiCategory="Faces";
 var LOOK={theme:"yellow",bg:"yellow"},TC={yellow:"#D4A017"},pres={},typingUntil=0;
 function applyLook(t,b){
   t="yellow";b="yellow";
@@ -398,12 +417,23 @@ function renderList(){
   if(!h)h='<p class="note" style="padding:16px">'+(tab==="groups"?"No groups yet. Tap “New group” to start one.":tab==="shop"?"The shop chat will appear here.":"No chats here yet.")+'</p>';
   $("list").innerHTML=h;
 }
+function emojiPicker(){
+  var cats=Object.keys(EMOJIS);
+  return '<div id="emo" hidden><input id="emojiSearch" placeholder="Search emojis" aria-label="Search emojis"><div id="emojiCats">'+cats.map(function(c){return '<button class="emocat'+(c===emojiCategory?' on':'')+'" data-emocat="'+c+'">'+c+'</button>'}).join('')+'</div><div id="emojiGrid"></div></div>';
+}
+function drawEmojiGrid(search){
+  var box=$("emojiGrid");if(!box)return;
+  var q=String(search||"").trim().toLowerCase(),cat=q&&Object.keys(EMOJIS).find(function(c){return c.toLowerCase().indexOf(q)>-1}),items=q?(cat?EMOJIS[cat].split(" "):Object.keys(EMOJIS).reduce(function(a,c){return a.concat(EMOJIS[c].split(" "))},[])):(EMOJIS[emojiCategory]||"").split(" ");
+  var names={heart:"❤️",love:"🥰",smile:"😀",happy:"😃",laugh:"😂",joy:"🤣",cry:"😭",sad:"😢",angry:"😡",cool:"😎",wink:"😉",kiss:"😘",hug:"🤗",think:"🤔",thumb:"👍",fire:"🔥",party:"🎉",celebrate:"🥳",food:"🍕",cat:"🐱",dog:"🐶",flag:"🇺🇬",pray:"🙏",thanks:"🙏",lovehands:"🫶",clap:"👏",money:"💸",gift:"🎁",sun:"☀️",rain:"🌧️",car:"🚗",football:"⚽",basketball:"🏀",music:"🎵",coffee:"☕",cake:"🎂",flower:"🌸",poop:"💩",robot:"🤖",ghost:"👻",heartbroken:"💔"};
+  if(q)items=items.filter(function(e){return Object.keys(names).some(function(n){return n.indexOf(q)>-1&&names[n]===e})});
+  box.innerHTML=items.map(function(e){return '<button class="emojiBtn" data-emo="'+e+'" aria-label="Emoji '+e+'">'+e+'</button>'}).join("")||'<small class="note">No matching emojis</small>';
+}
 function renderMain(){
   if(!cur){$("main").innerHTML='<div class="empty">Pick a chat, or type a friend’s name or phone number and tap Chat.</div>';return}
   $("main").innerHTML='<div class="hdr"><button class="back" id="back" aria-label="Back to chats">‹</button><button class="who" id="who">'+avh(cur)+'<span class="grow"><strong id="hn">'+esc(label(cur))+(dis[cur]?' ⏳':'')+'</strong><small id="st"></small></span></button>'+
   (cur==="shop"?'<button class="light" id="browse">Browse products</button>':'')+(cur==="shop"||isG(cur)?'':'<button class="light" id="call_a" aria-label="Voice call">📞</button><button class="light" id="call_v" aria-label="Video call">🎥</button>')+'<button class="light" id="chatmenu" aria-label="Chat options">⋮</button></div>'+
   '<div class="pinbar" id="pinbar" hidden></div><div class="msgs" id="msgs"></div><div class="shop" id="shop" hidden></div>'+
-  '<div class="mnl" id="mnl" hidden></div><div class="rb" id="rb" hidden></div><div id="emo" hidden>'+EMO.map(function(e){return '<button data-emo="'+e+'">'+e+'</button>'}).join("")+'</div><div class="bar"><button class="clip" id="clip" aria-label="Send a photo, video or file">📎</button><button class="clip" id="emob" aria-label="Emoji">😊</button><button class="clip" id="mic" aria-label="Record a voice note">🎤</button><input id="in" placeholder="Write a message" aria-label="Write a message" autocomplete="off"><button class="pri" id="send">Send</button></div>';
+  '<div class="mnl" id="mnl" hidden></div><div class="rb" id="rb" hidden></div>'+emojiPicker()+'<div class="bar"><button class="clip" id="clip" aria-label="Send a photo, video or file">📎</button><button class="clip" id="emob" aria-label="Emoji">😊</button><button class="clip" id="mic" aria-label="Record a voice note">🎤</button><input id="in" placeholder="Write a message" aria-label="Write a message" autocomplete="off"><button class="pri" id="send">Send</button></div>';
   renderMsgs();showPres();showReply();
 }
 function fileHtml(m,i){
@@ -497,6 +527,33 @@ setInterval(loadStories,60000);
 /* ---------- home menu and colour ---------- */
 function applyColor(){var s=document.documentElement.style;["--red","--dk","--avbg","--me","--hover","--hink"].forEach(function(k){s.removeProperty(k)});var mt=document.querySelector("meta[name=theme-color]");if(mt)mt.content="#D4A017"}
 function homeMenu(){modal('<div class="sheet"><button class="act" id="newg">👥 New group</button><button class="act" id="starl">⭐ Starred messages</button><button class="act" id="profbtn">⚙️ Settings</button><button class="lnk" id="p_close">Close</button></div>')}
+var boardArea="";try{boardArea=localStorage.getItem("gumzo_board_area")||""}catch(e){}
+function openBoard(){$("app").classList.remove("open");$("app").classList.add("community");renderBoard()}
+function closeBoard(){$("app").classList.remove("community");if(cur)$("app").classList.add("open");renderMain()}
+function renderBoard(){
+  $("main").innerHTML='<div class="boardview"><div class="boardhead"><button class="light" id="board_close">← Chats</button><div class="grow"><strong>Community Board</strong><small>Local announcements, events, offers and help</small></div><button class="light" id="board_refresh">↻</button></div><div class="boardtoolbar"><input id="board_filter" maxlength="48" placeholder="Show posts near a town or area" value="'+esc(boardArea)+'"><button class="pri" id="board_filter_btn">Show</button></div><div class="boardcompose"><b>Share something with your area</b><p class="note">Posts are visible to Gumzo users. Please keep them kind and don’t share private details.</p><div class="boardrow"><input id="board_post_area" maxlength="48" placeholder="Your town or area" value="'+esc(boardArea)+'"><select id="board_category"><option>Announcement</option><option>Event</option><option>For sale</option><option>Help</option></select></div><textarea id="board_body" maxlength="500" placeholder="Write a short post (up to 500 characters)"></textarea><div class="boardactions"><button class="pri" id="board_publish">Share post</button></div></div><div id="board_msg" class="note" role="status"></div><div id="boardfeed" class="boardfeed"><p class="boardempty">Loading posts…</p></div></div>';
+  loadBoard();
+}
+function boardCards(items){
+  var box=$("boardfeed");if(!box)return;
+  if(!items.length){box.innerHTML='<p class="boardempty">No posts here yet. You can start the conversation.</p>';return}
+  box.innerHTML=items.map(function(x){prof[x.owner]=prof[x.owner]||{};prof[x.owner].av=x.av;var mine=x.owner===me;
+    return '<article class="boardcard"><div class="boardcardhead">'+avh(x.owner)+'<div class="grow"><b>'+esc(x.owner)+'</b><small>'+esc(x.area)+' · '+esc(new Date(x.created).toLocaleString())+'</small></div><span class="boardtype">'+esc(x.category)+'</span></div><div class="boardbody">'+esc(x.body)+'</div><div class="boardactions">'+(mine?'<button data-board-delete="'+x.id+'">Remove</button>':'<button data-board-chat="'+esc(x.owner)+'">Chat</button><button data-board-report="'+x.id+'">Report</button>')+'</div></article>'
+  }).join("");
+}
+function loadBoard(){
+  var f=$("board_filter");if(f)boardArea=f.value.trim();
+  try{localStorage.setItem("gumzo_board_area",boardArea)}catch(e){}
+  var box=$("boardfeed");if(box)box.innerHTML='<p class="boardempty">Loading posts…</p>';
+  api("/api/board?area="+encodeURIComponent(boardArea)).then(function(d){if(d.error)throw Error(d.error);boardCards(d.items||[])}).catch(function(){if(box)box.innerHTML='<p class="boardempty">Could not load posts. Check your internet and try again.</p>'});
+}
+function shareBoardPost(){
+  var area=$("board_post_area").value.trim(),body=$("board_body").value.trim(),category=$("board_category").value,msg=$("board_msg");
+  if(!area){msg.textContent="Add your town or area first.";return}
+  if(!body){msg.textContent="Write a short post first.";return}
+  msg.textContent="Sharing…";
+  post("/api/board",{area:area,body:body,category:category}).then(function(d){if(d.error){msg.textContent=d.error;return}boardArea=area;$("board_filter").value=area;try{localStorage.setItem("gumzo_board_area",area)}catch(e){}$("board_body").value="";msg.textContent="Your post is on the board.";loadBoard()}).catch(function(){msg.textContent="Could not share. Check your internet and try again."});
+}
 /* ---------- voice and video calls ---------- */
 var pc=null,ls=null,cw="",cvid=false,pend=null,icq=[],ctm=0,ice=null;
 function iceCfg(){return ice?Promise.resolve(ice):api("/api/ice").then(function(d){ice=d.iceServers;return ice}).catch(function(){ice=[{urls:"stun:stun.l.google.com:19302"}];return ice})}
@@ -561,7 +618,7 @@ function renderShop(){
   if($("shop")){$("shop").innerHTML=h;$("shop").hidden=false}
 }
 function openSms(){var p=prof[cur]||{},phone=String(p.phone||"").replace(/[^0-9+]/g,"");if(!phone){closeModal();status("This person has not added a phone number to Gumzo yet.");return}var draft=$("in")?$("in").value.trim():"";var url="sms:"+phone+(draft?"?body="+encodeURIComponent(draft):"");closeModal();window.location.href=url}
-function openChat(n){closeModal();if(prefs[n]&&prefs[n].u){prefs[n].u=false;tx({type:"pref",with:n,key:"u",on:false})}cur=n;replyTo=null;chat(n).un=0;tx({type:"read",with:n});if(!isG(n))tx({type:"presence",with:n});$("app").classList.add("open");renderList();renderMain()}
+function openChat(n){closeModal();$("app").classList.remove("community");if(prefs[n]&&prefs[n].u){prefs[n].u=false;tx({type:"pref",with:n,key:"u",on:false})}cur=n;replyTo=null;chat(n).un=0;tx({type:"read",with:n});if(!isG(n))tx({type:"presence",with:n});$("app").classList.add("open");renderList();renderMain()}
 
 /* ---------- sending ---------- */
 function send(){
@@ -659,7 +716,7 @@ function msgMenu(i){
   var m=chats[cur].m[i];if(!m||!m.id)return;selMsg=i;
   var h='<div class="sheet"><strong>Message</strong>';
   if(!m.del){
-    h+='<div class="cen">'+["👍","❤️","😂","😮","😢","🙏"].map(function(e){return '<button style="font-size:26px" data-react="'+e+'">'+e+'</button>'}).join("")+'</div>';
+    h+='<div class="cen">'+["👍","❤️","😂","😮","😢","🙏","🫶","🔥","😍","🥳","😡","🎉","👏","💯"].map(function(e){return '<button style="font-size:26px" data-react="'+e+'">'+e+'</button>'}).join("")+'</div>';
     h+='<button class="act" id="act_star">⭐ '+(starred[m.id]?"Unstar":"Star")+' message</button><button class="act" id="act_pin">📌 '+(m.pn?"Unpin":"Pin")+' message</button><button class="act" id="act_fwd">↪️ Forward</button>';
   }
   if(!m.del&&m.me&&m.kind==="msg"&&!m.file&&Date.now()-m.ts<120000)h+='<button class="act" id="act_edit">✏️ Edit (up to 2 minutes after sending)</button>';
@@ -740,8 +797,17 @@ document.addEventListener("click",function(e){
   var bub=e.target.closest(".m");
   if(bub&&!e.target.closest("a,video,button")){return msgMenu(+bub.dataset.mi)}
   var t=e.target.closest("button");if(!t)return;
+  if(t.id==="board_open"){openBoard();return}
+  if(t.id==="board_close"){closeBoard();return}
+  if(t.id==="board_refresh"){loadBoard();return}
+  if(t.id==="board_filter_btn"){loadBoard();return}
+  if(t.id==="board_publish"){shareBoardPost();return}
+  if(t.dataset.boardChat){var bn=t.dataset.boardChat;loadProf(bn);closeBoard();openChat(bn);return}
+  if(t.dataset.boardDelete){if(!confirm("Remove your post from the Community Board?"))return;post("/api/board/delete",{id:+t.dataset.boardDelete}).then(function(d){if(d.error){alert(d.error);return}loadBoard()}).catch(function(){alert("Could not remove this post")});return}
+  if(t.dataset.boardReport){var why=prompt("Why are you reporting this post? (spam, abuse, scam, other)");if(why)post("/api/board/report",{id:+t.dataset.boardReport,reason:why.trim()}).then(function(d){alert(d.error||"Thanks. The post has been reported.")}).catch(function(){alert("Could not send the report")});return}
   if(t.dataset.grm){tx({type:"gremove",id:cur,name:t.dataset.grm});closeModal();return}
-  if(t.dataset.emo){var ii=$("in");if(ii){ii.value+=t.dataset.emo;ii.focus()}return}
+  if(t.dataset.emocat){emojiCategory=t.dataset.emocat;document.querySelectorAll(".emocat").forEach(function(x){x.classList.toggle("on",x.dataset.emocat===emojiCategory)});drawEmojiGrid();return}
+  if(t.dataset.emo){var ii=$("in");if(ii){ii.value+=t.dataset.emo;ii.focus()}t.classList.remove("emoji-pop");void t.offsetWidth;t.classList.add("emoji-pop");setTimeout(function(){t.classList.remove("emoji-pop")},400);return}
   if(t.dataset.sbg){stBg=t.dataset.sbg;document.querySelectorAll("button[data-sbg]").forEach(function(x){x.classList.toggle("on",x===t)});return}
   if(t.dataset.sv){svList=(window._st||{})[t.dataset.sv]||[];svI=0;closeModal();showSv();return}
   if(t.dataset.sdel){post("/api/status/delete",{id:+t.dataset.sdel}).then(function(){$("sv").hidden=true;loadStories()});return}
@@ -776,7 +842,7 @@ document.addEventListener("click",function(e){
     case"blk":blocked[cur]=!blocked[cur];tx({type:"block",with:cur,on:!!blocked[cur]});closeModal();status(blocked[cur]?"Blocked "+cur:"Unblocked "+cur);return;
     case"del_acc":modal('<div class="sheet"><strong style="font-size:18px">Delete your account?</strong><p class="note">Your messages, photos and profile will be deleted for good. This cannot be undone.</p><p class="note"><b>Why are you leaving?</b> (optional)</p><label class="act"><input type="radio" name="dr" value="Using another app"> I use another app</label><label class="act"><input type="radio" name="dr" value="Privacy worries"> I am worried about my privacy</label><label class="act"><input type="radio" name="dr" value="Do not use it enough"> I do not use it enough</label><input id="del_pw" type="password" placeholder="Type your password to confirm" autocomplete="current-password"><p class="note" id="del_msg"></p><button class="pri" id="del_go" style="background:#C62828;color:#fff">Delete my account forever</button><button class="lnk" id="p_close">Cancel</button></div>');return;
     case"del_go":{var dpw=$("del_pw").value;if(!dpw){$("del_msg").textContent="Type your password first";return}var dr=document.querySelector("input[name=dr]:checked");post("/api/delete-account",{password:dpw,reason:dr?dr.value:""}).then(function(d){if(d.error){$("del_msg").textContent=d.error;return}try{localStorage.removeItem("gz")}catch(e){}location.reload()});return}
-    case"emob":$("emo").hidden=!$("emo").hidden;return;
+    case"emob":$("emo").hidden=!$("emo").hidden;if(!$("emo").hidden)drawEmojiGrid();return;
     case"sms_send":return openSms();
     case"loc_send":closeModal();return sendLoc();
     case"exp_chat":closeModal();return exportChat();
@@ -853,6 +919,7 @@ document.addEventListener("change",function(e){
 });
 document.addEventListener("input",function(e){
   if(e.target.id==="srch")renderList();
+  if(e.target.id==="emojiSearch")drawEmojiGrid(e.target.value);
   if(e.target.id==="in"&&!low&&Date.now()-lastTyping>1500&&cur&&!isG(cur)){lastTyping=Date.now();tx({type:"typing",to:cur})}
 });
 document.addEventListener("keydown",function(e){

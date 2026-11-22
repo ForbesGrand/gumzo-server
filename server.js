@@ -179,6 +179,9 @@ async function setup() {
   await q("create table if not exists status_views(status_id bigint not null, viewer text not null, primary key(status_id, viewer))");
   await q("alter table messages add column if not exists expires_at timestamptz");
   await q("create table if not exists disappear(a text not null, b text not null default '', secs int not null, primary key(a, b))");
+  await q("create table if not exists board_posts(id bigserial primary key, owner text not null, area text not null, category text not null, body text not null, created timestamptz default now(), deleted_at timestamptz)");
+  await q("create index if not exists board_posts_recent on board_posts(created desc) where deleted_at is null");
+  await q("create table if not exists board_reports(post_id bigint not null, reporter text not null, reason text not null default '', created timestamptz default now(), primary key(post_id,reporter))");
   await q("alter table files add column if not exists once boolean not null default false");
   await q("alter table files add column if not exists viewed boolean not null default false");
   await q("alter table prefs add column if not exists unread boolean not null default false");
@@ -376,6 +379,38 @@ async function handler(req, res) {
     let user = null;
     try { user = await authUser(req, url); } catch (e) { return json(res, 500, { error: "Server problem" }); }
     if (!user) return json(res, 401, { error: "Please log in again" });
+
+    if (p === "/api/board" && req.method === "GET") {
+      const area = String(url.searchParams.get("area") || "").trim().slice(0, 48);
+      const r = await q("select p.id,p.owner,u.avatar_v,p.area,p.category,p.body,p.created from board_posts p join users u on u.name=p.owner where p.deleted_at is null and p.created > now()-interval '90 days' and ($1='' or lower(p.area)=lower($1)) order by p.created desc limit 100", [area]);
+      return json(res, 200, { items: r.rows.map((x) => ({ id: Number(x.id), owner: x.owner, av: x.avatar_v, area: x.area, category: x.category, body: x.body, created: x.created })) });
+    }
+    if (req.method === "POST" && p === "/api/board") {
+      const b = await readBody(req);
+      const area = String(b.area || "").trim().replace(/\s+/g, " ").slice(0, 48);
+      const body = String(b.body || "").trim().slice(0, 500);
+      const category = String(b.category || "");
+      if (!area) return json(res, 400, { error: "Add your town or area first" });
+      if (!body) return json(res, 400, { error: "Write a short post first" });
+      if (!["Announcement", "Event", "For sale", "Help"].includes(category)) return json(res, 400, { error: "Choose a post type" });
+      const count = await q("select count(*)::int as n from board_posts where owner=$1 and created > now()-interval '1 hour' and deleted_at is null", [user]);
+      if (count.rows[0].n >= 10) return json(res, 429, { error: "You have shared a lot recently. Try again later." });
+      const r = await q("insert into board_posts(owner,area,category,body) values($1,$2,$3,$4) returning id,created", [user, area, category, body]);
+      return json(res, 200, { ok: true, item: { id: Number(r.rows[0].id), owner: user, area, category, body, created: r.rows[0].created } });
+    }
+    if (req.method === "POST" && p === "/api/board/delete") {
+      const b = await readBody(req);
+      const r = await q("update board_posts set deleted_at=now() where id=$1 and owner=$2 and deleted_at is null returning id", [parseInt(b.id), user]);
+      if (!r.rows.length) return json(res, 404, { error: "That post was already removed" });
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === "POST" && p === "/api/board/report") {
+      const b = await readBody(req), id = parseInt(b.id);
+      const exists = await q("select 1 from board_posts where id=$1 and owner<>$2 and deleted_at is null", [id, user]);
+      if (!exists.rows.length) return json(res, 404, { error: "That post is no longer available" });
+      await q("insert into board_reports(post_id,reporter,reason) values($1,$2,$3) on conflict(post_id,reporter) do nothing", [id, user, String(b.reason || "").slice(0, 120)]);
+      return json(res, 200, { ok: true });
+    }
 
     if (p === "/api/vapid") return json(res, 200, { key: vapid ? vapid.pub : null });
     if (req.method === "POST" && p === "/api/push") {
